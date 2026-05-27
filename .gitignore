@@ -1,0 +1,37 @@
+# Environment & secrets
+.env
+*.env
+.env.*
+config.local.py
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Sensitive personal data
+portfolio.json
+profile.json
+watchlist.json
+combined_holdings.csv
+brokerage_holdings.csv
+roth_ira_holdings.csv
+*_holdings.csv
+
+# Fidelity / brokerage exports
+Portfolio_Positions_*.csv
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log

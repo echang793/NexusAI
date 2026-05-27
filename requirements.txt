@@ -1,0 +1,6 @@
+streamlit
+yfinance
+pandas
+anthropic
+finnhub-python
+python-dotenv
