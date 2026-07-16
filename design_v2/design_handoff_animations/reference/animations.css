@@ -1,0 +1,345 @@
+/* =====================================================
+   Animation enhancements on top of styles.css
+   All keyframes use Apple-ish spring-y curves.
+   Toggleable via body[data-anim-*] attributes.
+   ===================================================== */
+
+:root {
+  --anim-spring: cubic-bezier(0.34, 1.32, 0.4, 1);
+  --anim-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --anim-speed: 1;
+}
+
+/* Master kill-switch — turns every transition/animation into a 1ms no-op. */
+body[data-anim-master="off"] *,
+body[data-anim-master="off"] *::before,
+body[data-anim-master="off"] *::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
+}
+
+/* =================== Section cross-fade =================== */
+.section { display: none; }
+.section.active { display: block; }
+/* One-shot enter — added by JS, removed by JS (with timeout fallback) after
+   the animation completes. Critically, the keyframes do NOT set opacity:0 at
+   `from`: if the animation never advances (throttled tab / html-to-image
+   capture / reduced-motion), the section is still fully visible. */
+.section.section-enter {
+  animation: sectionIn calc(380ms / var(--anim-speed)) var(--anim-ease) both;
+}
+@keyframes sectionIn {
+  from { transform: translateY(8px) scale(0.992); filter: blur(4px); }
+  to   { transform: translateY(0) scale(1); filter: blur(0); }
+}
+body[data-anim-section-fade="off"] .section.section-enter { animation: none; }
+
+/* =================== Card reveal on intersect =================== */
+/* Resting state of `.card` is fully visible. The enter animation only nudges
+   transform; we do NOT set opacity:0 in the keyframes so that a non-playing
+   animation (throttled / snapshot) still shows the card. */
+.card.card-enter {
+  animation: cardEnter calc(560ms / var(--anim-speed)) var(--anim-spring) both;
+}
+@keyframes cardEnter {
+  from { transform: translateY(14px); }
+  to   { transform: translateY(0); }
+}
+body[data-anim-reveal="off"] .card.card-enter { animation: none; }
+
+/* =================== Hero number count-up shimmer =================== */
+.hero-value.counting {
+  background: linear-gradient(
+    100deg,
+    var(--text) 0%, var(--text) 38%,
+    var(--accent) 50%,
+    var(--text) 62%, var(--text) 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text; -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: heroShimmer calc(1400ms / var(--anim-speed)) ease-out forwards;
+}
+@keyframes heroShimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -20% 0; }
+}
+
+/* Subtle "just changed" pulse on numbers when edited */
+.tick-up   { animation: tickUp   calc(620ms / var(--anim-speed)) var(--anim-ease) both; }
+.tick-down { animation: tickDown calc(620ms / var(--anim-speed)) var(--anim-ease) both; }
+@keyframes tickUp {
+  0%   { background-color: rgba(0,0,0,0); color: inherit; }
+  20%  { background-color: var(--green-soft); color: var(--green); }
+  100% { background-color: rgba(0,0,0,0); color: inherit; }
+}
+@keyframes tickDown {
+  0%   { background-color: rgba(0,0,0,0); color: inherit; }
+  20%  { background-color: var(--red-soft); color: var(--red); }
+  100% { background-color: rgba(0,0,0,0); color: inherit; }
+}
+
+/* =================== Chart line draw-in =================== */
+.path-draw {
+  stroke-dasharray: var(--len);
+  stroke-dashoffset: var(--len);
+  animation: pathDraw calc(1100ms / var(--anim-speed)) var(--anim-ease) forwards;
+}
+@keyframes pathDraw {
+  to { stroke-dashoffset: 0; }
+}
+.area-fade {
+  opacity: 0;
+  animation: areaFade calc(900ms / var(--anim-speed)) calc(500ms / var(--anim-speed)) ease-out forwards;
+}
+@keyframes areaFade { to { opacity: 1; } }
+
+body[data-anim-charts="off"] .path-draw,
+body[data-anim-charts="off"] .area-fade {
+  animation: none;
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+
+/* =================== Donut wedge sweep =================== */
+.donut-seg {
+  /* set by JS: --len = arc length, --gap = total - len */
+  stroke-dasharray: 0 var(--circ);
+  animation: donutSweep calc(900ms / var(--anim-speed)) var(--anim-ease) forwards;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes donutSweep {
+  to { stroke-dasharray: var(--len) var(--gap); }
+}
+body[data-anim-donut="off"] .donut-seg {
+  animation: none;
+  stroke-dasharray: var(--len) var(--gap);
+}
+
+/* =================== Bar staggered grow =================== */
+.bar-fill {
+  transform-origin: left center;
+  transition: width calc(900ms / var(--anim-speed)) var(--anim-spring);
+}
+
+/* =================== Sliding nav indicator =================== */
+.nav-indicator {
+  position: absolute;
+  left: 0; right: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  box-shadow: 0 2px 8px var(--accent-soft);
+  z-index: 0;
+  transition:
+    top calc(360ms / var(--anim-speed)) var(--anim-spring),
+    height calc(360ms / var(--anim-speed)) var(--anim-spring),
+    opacity 200ms ease;
+  pointer-events: none;
+  opacity: 0;
+}
+.nav-indicator.ready { opacity: 1; }
+.nav { position: relative; }
+.nav-item { position: relative; z-index: 1; }
+/* When the sliding indicator is present, suppress the per-item background — the indicator is the highlight. */
+body[data-anim-nav="on"] .nav-item.active { background: transparent; box-shadow: none; }
+body[data-anim-nav="off"] .nav-indicator { display: none; }
+
+/* =================== Sparkline draw-in =================== */
+.spark polyline { stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
+  animation: pathDraw calc(900ms / var(--anim-speed)) var(--anim-ease) forwards; }
+body[data-anim-sparks="off"] .spark polyline { animation: none; stroke-dashoffset: 0; }
+
+/* =================== Chat typing indicator + stream =================== */
+.bubble.typing {
+  display: inline-flex; gap: 4px; align-items: center;
+  padding: 14px 18px; max-width: none; width: 56px;
+}
+.bubble.typing span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-3);
+  animation: typingBounce 1.1s ease-in-out infinite;
+}
+.bubble.typing span:nth-child(2) { animation-delay: 0.15s; }
+.bubble.typing span:nth-child(3) { animation-delay: 0.30s; }
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+.bubble.appear {
+  animation: bubbleIn calc(340ms / var(--anim-speed)) var(--anim-spring) both;
+}
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.cursor-blink::after {
+  content: "▍";
+  display: inline-block;
+  color: var(--accent);
+  font-weight: 400;
+  margin-left: 1px;
+  animation: blink 0.9s steps(2, start) infinite;
+}
+@keyframes blink { to { visibility: hidden; } }
+
+/* =================== Watchlist alert pulse =================== */
+.dot.green.pulse, .dot.red.pulse {
+  position: relative;
+}
+.dot.green.pulse::after, .dot.red.pulse::after {
+  content: ""; position: absolute; inset: -3px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: pulseRing 1.8s ease-out infinite;
+}
+.dot.green.pulse { color: var(--green); }
+.dot.red.pulse   { color: var(--red); }
+@keyframes pulseRing {
+  0%   { box-shadow: 0 0 0 0 currentColor; opacity: 0.5; }
+  100% { box-shadow: 0 0 0 10px currentColor; opacity: 0; }
+}
+
+/* =================== Card hover lift =================== */
+body[data-anim-hover="on"] .card {
+  transition: transform 280ms var(--anim-ease), box-shadow 280ms var(--anim-ease);
+}
+body[data-anim-hover="on"] .card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+}
+
+/* =================== View Transitions theme swap =================== */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) {
+  z-index: 2;
+  animation: themeReveal calc(700ms / var(--anim-speed)) var(--anim-ease);
+}
+@keyframes themeReveal {
+  from { clip-path: circle(0% at var(--tx, 50%) var(--ty, 50%)); }
+  to   { clip-path: circle(150% at var(--tx, 50%) var(--ty, 50%)); }
+}
+
+/* =================== Range pill sliding indicator =================== */
+.range-pills { position: relative; }
+.range-pills .pill-indicator {
+  position: absolute;
+  top: 3px; bottom: 3px;
+  background: var(--surface-solid);
+  border-radius: 7px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  z-index: 0;
+  transition:
+    left calc(340ms / var(--anim-speed)) var(--anim-spring),
+    width calc(340ms / var(--anim-speed)) var(--anim-spring),
+    opacity 200ms ease;
+  opacity: 0;
+}
+[data-theme="dark"] .range-pills .pill-indicator { box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+.range-pills .pill-indicator.ready { opacity: 1; }
+.range-pills button { position: relative; z-index: 1; transition: color 200ms ease; }
+body[data-anim-pills="on"] .range-pills button.active { background: transparent; box-shadow: none; }
+body[data-anim-pills="off"] .range-pills .pill-indicator { display: none; }
+
+/* =================== Topbar title cross-fade =================== */
+#topbar-title {
+  display: inline-block;
+  transition: opacity 200ms ease, transform 280ms var(--anim-ease);
+}
+#topbar-title.swapping {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* =================== Tweaks: Animation features list =================== */
+.tweaks-anim-list {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-top: 4px;
+}
+.tweaks-anim-row {
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center;
+  gap: 10px;
+  padding: 7px 8px; border-radius: 8px;
+  transition: background 150ms ease;
+}
+.tweaks-anim-row:hover { background: var(--surface-2); }
+.tweaks-anim-name {
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+}
+.tweaks-anim-desc {
+  font-size: 11px; color: var(--text-2);
+  grid-column: 2 / 3;
+}
+.tweaks-anim-name-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tweaks-anim-swatch {
+  width: 6px; height: 22px; border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.7;
+}
+.tweaks-anim-replay {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: var(--surface-2); color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  transition: background 150ms, color 150ms, transform 220ms var(--anim-spring);
+}
+.tweaks-anim-replay:hover { background: var(--accent-soft); color: var(--accent); }
+.tweaks-anim-replay.spinning svg { animation: spin 700ms var(--anim-ease); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.tweaks-toggle {
+  width: 32px; height: 18px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  position: relative; flex-shrink: 0;
+  transition: background 220ms ease;
+  cursor: pointer;
+}
+.tweaks-toggle::after {
+  content: ""; position: absolute;
+  top: 1px; left: 1px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: left 220ms var(--anim-spring);
+}
+.tweaks-toggle.on { background: var(--accent); border-color: transparent; }
+.tweaks-toggle.on::after { left: 15px; }
+
+.tweaks-panel.wide { width: 320px; }
+
+/* Replay-all button at top */
+.tweaks-replay-all {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 12px; border-radius: 10px;
+  background: var(--accent); color: white;
+  font-size: 13px; font-weight: 600;
+  width: 100%;
+  transition: filter 150ms ease, transform 220ms var(--anim-spring);
+}
+.tweaks-replay-all:hover { filter: brightness(1.1); }
+.tweaks-replay-all:active { transform: scale(0.97); }
+
+.tweaks-master-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0; margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.tweaks-master-row .label { font-size: 13px; font-weight: 600; }
+.tweaks-speed {
+  display: flex; gap: 2px; padding: 2px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px;
+  margin-top: 6px;
+}
+.tweaks-speed button {
+  flex: 1; padding: 4px 6px; border-radius: 5px;
+  font-size: 11px; font-weight: 500; color: var(--text-2);
+}
+.tweaks-speed button.active {
+  background: var(--surface-solid); color: var(--text);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}

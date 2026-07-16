@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NexusAI — Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* Print-report shell — all five sections stacked, each on its own page */
+  body { overflow: auto; }
+  .print-wrap { width: 1080px; margin: 0 auto; padding: 0; }
+  .print-cover {
+    padding: 80px 60px 60px;
+    border-bottom: 2px solid var(--border-strong);
+    margin-bottom: 0;
+  }
+  .print-cover .brand-row { display: flex; align-items: center; gap: 14px; margin-bottom: 48px; }
+  .print-cover .brand-mark { width: 40px; height: 40px; }
+  .print-cover .brand-name { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+  .print-cover .brand-name .ai { color: var(--accent); }
+  .print-cover h1 { font-size: 52px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.02; }
+  .print-cover .sub { font-size: 16px; color: var(--text-2); margin-top: 14px; }
+  .print-cover .meta-row { display: flex; gap: 40px; margin-top: 40px; padding-top: 28px; border-top: 1px solid var(--border); }
+  .print-cover .meta-item .l { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); font-weight: 600; }
+  .print-cover .meta-item .v { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-top: 6px; }
+
+  .print-section { padding: 48px 60px 56px; }
+  .print-section-head {
+    display: flex; align-items: baseline; gap: 14px;
+    margin-bottom: 28px; padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .print-section-head .n {
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .print-section-head h2 { font-size: 30px; font-weight: 700; letter-spacing: -0.025em; }
+  .print-section-head .desc { font-size: 13px; color: var(--text-2); margin-left: auto; }
+
+  /* Expand interactive/scroll regions for print */
+  .chat-shell { height: auto !important; position: static !important; }
+  .chat-stream { height: auto !important; overflow: visible !important; }
+  .main { overflow: visible; }
+
+  @media print {
+    @page { size: landscape; margin: 0; }
+    html, body { background: #ffffff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .print-cover { break-after: page; min-height: 92vh; }
+    .print-section { break-before: page; }
+    .print-section:first-of-type { break-before: auto; }
+    .card, .hero, .verdict, .stat-tile, .panel { break-inside: avoid; }
+    .grid { break-inside: avoid; }
+  }
+</style>
+</head>
+<body data-theme="light" data-density="regular">
+
+<div class="print-wrap">
+  <!-- Cover -->
+  <section class="print-cover">
+    <div class="brand-row">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Nexus<span class="ai">AI</span></div>
+    </div>
+    <h1>Portfolio &amp;<br>Advisory Report</h1>
+    <div class="sub" id="cover-sub"></div>
+    <div class="meta-row" id="cover-meta"></div>
+  </section>
+
+  <section class="print-section" data-sec="overview">
+    <div class="print-section-head"><span class="n">01</span><h2>Overview</h2><span class="desc">Net worth · accounts · allocation</span></div>
+    <div id="p-overview"></div>
+  </section>
+
+  <section class="print-section" data-sec="analyze">
+    <div class="print-section-head"><span class="n">02</span><h2>Analyze</h2><span class="desc">AAPL deep dive</span></div>
+    <div id="p-analyze"></div>
+  </section>
+
+  <section class="print-section" data-sec="portfolio">
+    <div class="print-section-head"><span class="n">03</span><h2>Portfolio</h2><span class="desc">44 holdings · risk</span></div>
+    <div id="p-portfolio"></div>
+  </section>
+
+  <section class="print-section" data-sec="watchlist">
+    <div class="print-section-head"><span class="n">04</span><h2>Watchlist</h2><span class="desc">Tracked tickers · news</span></div>
+    <div id="p-watchlist"></div>
+  </section>
+
+  <section class="print-section" data-sec="advisor">
+    <div class="print-section-head"><span class="n">05</span><h2>Advisor</h2><span class="desc">AI plan · action items</span></div>
+    <div id="p-advisor"></div>
+  </section>
+</div>
+
+<script src="../../data.js"></script>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="sections-1.js"></script>
+<script src="sections-2.js"></script>
+<script>
+(function () {
+  const D = window.NEXUS_DATA;
+  // Cover
+  document.getElementById("cover-sub").textContent =
+    `Prepared for ${D.profile.name} · ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}`;
+  document.getElementById("cover-meta").innerHTML = `
+    <div class="meta-item"><div class="l">Net Worth</div><div class="v">${fmt$(D.netWorth,{compact:true})}</div></div>
+    <div class="meta-item"><div class="l">Invested</div><div class="v">${fmt$(D.portfolioValue,{compact:true})}</div></div>
+    <div class="meta-item"><div class="l">Unrealized P/L</div><div class="v" style="color:var(--green)">${fmt$(D.totalPL,{signed:true,compact:true})}</div></div>
+    <div class="meta-item"><div class="l">Profile</div><div class="v">${D.profile.risk}</div></div>
+  `;
+
+  // Render all sections
+  document.getElementById("p-overview").innerHTML = AppleSections.renderOverview();
+  document.getElementById("p-analyze").innerHTML = AppleSections.renderAnalyze();
+  document.getElementById("p-portfolio").innerHTML = AppleSections.renderPortfolio();
+  document.getElementById("p-watchlist").innerHTML = AppleSections.renderWatchlist();
+  document.getElementById("p-advisor").innerHTML = AppleSections.renderAdvisor();
+
+  // Hydrate charts/bars for every section (they're all visible here)
+  function hydrateAll() {
+    AppleSections.hydrateOverview();
+    AppleSections.hydrateAnalyze();
+    AppleSections.hydratePortfolio();
+    AppleSections.hydrateWatchlist();
+    AppleSections.hydrateAdvisor();
+  }
+  hydrateAll();
+  // Charts size to container width — redraw once after layout settles
+  setTimeout(hydrateAll, 300);
+
+  // Auto-open print dialog once fonts + charts are ready
+  function triggerPrint() {
+    setTimeout(() => window.print(), 500);
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => setTimeout(triggerPrint, 400));
+  } else {
+    window.addEventListener("load", () => setTimeout(triggerPrint, 600));
+  }
+})();
+</script>
+
+</body>
+</html>

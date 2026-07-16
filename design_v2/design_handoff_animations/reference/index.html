@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NexusAI — Animated</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="animations.css">
+</head>
+<body data-theme="light">
+
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Nexus<span class="ai">AI</span></div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="nav-section">Investing</div>
+      <button class="nav-item active" data-section="overview"><span class="nav-icon" id="ni-overview"></span>Overview</button>
+      <button class="nav-item" data-section="analyze"><span class="nav-icon" id="ni-analyze"></span>Analyze</button>
+      <button class="nav-item" data-section="portfolio"><span class="nav-icon" id="ni-portfolio"></span>Portfolio<span class="nav-badge">44</span></button>
+      <button class="nav-item" data-section="watchlist"><span class="nav-icon" id="ni-watchlist"></span>Watchlist<span class="nav-badge">6</span></button>
+      <div class="nav-section">AI</div>
+      <button class="nav-item" data-section="advisor"><span class="nav-icon" id="ni-advisor"></span>Advisor<span class="nav-badge" style="background:linear-gradient(135deg, #0a84ff, #b14aff); color:white;">new</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="theme-toggle" id="theme-toggle">
+        <button data-theme-set="light" class="active"><span id="tt-light"></span>Light</button>
+        <button data-theme-set="dark"><span id="tt-dark"></span>Dark</button>
+      </div>
+      <div class="profile-chip">
+        <div class="avatar">AC</div>
+        <div>
+          <div class="profile-name">Alex Chen</div>
+          <div class="profile-meta">Aggressive · 30yr horizon</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="section-title" id="topbar-title">Overview</div>
+      </div>
+      <div class="search" id="cmd-trigger" role="button" tabindex="0">
+        <span id="search-icon"></span>
+        <span class="search-placeholder">Search tickers, accounts, news…</span>
+        <span class="search-kbd">⌘K</span>
+      </div>
+      <button class="icon-btn" id="bell-btn"></button>
+      <button class="icon-btn" id="settings-btn"></button>
+    </header>
+
+    <div class="content">
+      <div id="section-overview" class="section active"></div>
+      <div id="section-analyze" class="section"></div>
+      <div id="section-portfolio" class="section"></div>
+      <div id="section-watchlist" class="section"></div>
+      <div id="section-advisor" class="section"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Command palette -->
+<div class="cmdk-overlay" id="cmdk" hidden>
+  <div class="cmdk-panel" role="dialog" aria-label="Command palette">
+    <div class="cmdk-input-row">
+      <span class="cmdk-search-icon" id="cmdk-icon"></span>
+      <input id="cmdk-input" placeholder="Jump to a ticker, account, or section…" autocomplete="off"/>
+      <span class="search-kbd">ESC</span>
+    </div>
+    <div class="cmdk-results" id="cmdk-results"></div>
+  </div>
+</div>
+
+<!-- Data + helpers -->
+<script src="data.js"></script>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="sections-1.js"></script>
+<script src="sections-2.js"></script>
+<script src="command.js"></script>
+<script src="tweaks.js"></script>
+<script src="animations.js"></script>
+
+<script>
+(function init() {
+  // Set nav icons
+  const icons = {
+    "ni-overview": "home", "ni-analyze": "chart", "ni-portfolio": "wallet",
+    "ni-watchlist": "eye", "ni-advisor": "sparkles",
+    "search-icon": "search", "bell-btn": "bell", "settings-btn": "settings",
+    "tt-light": "sun", "tt-dark": "moon",
+  };
+  Object.entries(icons).forEach(([id, name]) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = Icon(name, id.startsWith("ni-") ? 16 : 14);
+  });
+
+  // Render each section's HTML
+  const titles = {
+    overview: "Overview", analyze: "Analyze", portfolio: "Portfolio",
+    watchlist: "Watchlist", advisor: "Advisor",
+  };
+  document.getElementById("section-overview").innerHTML = AppleSections.renderOverview();
+  document.getElementById("section-analyze").innerHTML = AppleSections.renderAnalyze();
+  document.getElementById("section-portfolio").innerHTML = AppleSections.renderPortfolio();
+  document.getElementById("section-watchlist").innerHTML = AppleSections.renderWatchlist();
+  document.getElementById("section-advisor").innerHTML = AppleSections.renderAdvisor();
+
+  // Hydrate initial section
+  AppleSections.hydrateOverview();
+
+  let active = "overview";
+
+  // Shared navigation — used by sidebar nav, command palette, and ticker jumps.
+  function navigateTo(sec) {
+    if (!titles[sec] || sec === active) return;
+    document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.section === sec));
+    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+    document.getElementById("section-" + sec).classList.add("active");
+    document.getElementById("topbar-title").textContent = titles[sec];
+    document.querySelector(".main").scrollTo({ top: 0, behavior: "instant" });
+    active = sec;
+    AppleSections._redraw = null; // clear stale chart redraw
+    setTimeout(() => {
+      const fn = AppleSections["hydrate" + sec.charAt(0).toUpperCase() + sec.slice(1)];
+      if (fn) fn();
+    }, 60);
+  }
+
+  // Jump to a ticker: holdings -> Portfolio + flash row; otherwise -> Watchlist.
+  function flashTicker(ticker) {
+    const inHoldings = NEXUS_DATA.positions.some(p => p.ticker === ticker);
+    const dest = inHoldings ? "portfolio" : "watchlist";
+    navigateTo(dest);
+    setTimeout(() => {
+      const row = document.querySelector(`#section-${dest} [data-row-ticker="${ticker}"]`);
+      if (row) {
+        const main = document.querySelector(".main");
+        const top = row.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 120;
+        main.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        row.classList.add("row-flash");
+        setTimeout(() => row.classList.remove("row-flash"), 1600);
+      }
+    }, 140);
+  }
+
+  window.Nexus = { navigateTo, flashTicker, getActive: () => active };
+
+  if (window.CommandPalette) CommandPalette.init();
+  if (window.NexusTweaks) NexusTweaks.init();
+
+  // Nav handler
+  document.getElementById("nav").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-section]");
+    if (item) navigateTo(item.dataset.section);
+  });
+
+  // Theme toggle
+  document.getElementById("theme-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-theme-set]");
+    if (!btn) return;
+    document.querySelectorAll("[data-theme-set]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.body.setAttribute("data-theme", btn.dataset.themeSet);
+    // re-render charts since they pull CSS vars
+    if (active === "overview") AppleSections.hydrateOverview();
+    else if (active === "analyze") AppleSections.hydrateAnalyze();
+  });
+
+  // Re-render charts on resize (SVGs are sized to container width at draw time)
+  let rzTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(rzTimer);
+    rzTimer = setTimeout(() => {
+      if (AppleSections._redraw) AppleSections._redraw();
+    }, 160);
+  });
+})();
+</script>
+</body>
+</html>
