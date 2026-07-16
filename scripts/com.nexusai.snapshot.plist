@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: record a NexusAI net-worth snapshot on the 1st of each month.
+
+  Install:
+    1. Edit the two paths below if your project lives elsewhere.
+    2. cp scripts/com.nexusai.snapshot.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.nexusai.snapshot.plist
+  Verify:    launchctl list | grep nexusai
+  Run now:   launchctl start com.nexusai.snapshot
+  Uninstall: launchctl unload ~/Library/LaunchAgents/com.nexusai.snapshot.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexusai.snapshot</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/erichang/Desktop/NexusAI/.venv/bin/python3</string>
+    <string>/Users/erichang/Desktop/NexusAI/scripts/monthly_snapshot.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/erichang/Desktop/NexusAI</string>
+
+  <!-- Fire on the 1st of every month at 09:00 (also catches up at next login if asleep) -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/erichang/Desktop/NexusAI/scripts/snapshot.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/erichang/Desktop/NexusAI/scripts/snapshot.log</string>
+</dict>
+</plist>

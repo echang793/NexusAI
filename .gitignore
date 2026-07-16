@@ -20,6 +20,7 @@ __pycache__/
 portfolio.json
 profile.json
 watchlist.json
+accounts.json
 combined_holdings.csv
 brokerage_holdings.csv
 roth_ira_holdings.csv
@@ -27,6 +28,20 @@ roth_ira_holdings.csv
 
 # Fidelity / brokerage exports
 Portfolio_Positions_*.csv
+
+# Raw brokerage exports awaiting normalization
+imports/*.csv
+imports/processed/
+
+# Generated caches (regenerated automatically, not source)
+price_cache.json
+period_cache.json
+risk_cache.json
+nw_history.json
+.odds_cache/
+
+# Local export/archive artifacts
+*.zip
 
 # macOS
 .DS_Store

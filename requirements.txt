@@ -4,3 +4,6 @@ pandas
 anthropic
 finnhub-python
 python-dotenv
+flask
+# Optional — only needed for bank-balance auto-sync via Plaid (paid service):
+# plaid-python

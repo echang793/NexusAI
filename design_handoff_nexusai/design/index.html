@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NexusAI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="animations.css">
+<link rel="stylesheet" href="sleek.css">
+</head>
+<body data-theme="light">
+
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Nexus<span class="ai">AI</span></div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="nav-indicator" id="nav-indicator"></div>
+      <div class="nav-section">Investing</div>
+      <button class="nav-item active" data-section="overview"><span class="nav-icon" id="ni-overview"></span>Overview</button>
+      <button class="nav-item" data-section="analyze"><span class="nav-icon" id="ni-analyze"></span>Analyze</button>
+      <button class="nav-item" data-section="portfolio"><span class="nav-icon" id="ni-portfolio"></span>Portfolio<span class="nav-badge" id="badge-portfolio">44</span></button>
+      <button class="nav-item" data-section="watchlist"><span class="nav-icon" id="ni-watchlist"></span>Watchlist<span class="nav-badge" id="badge-watchlist">6</span></button>
+      <div class="nav-section">AI</div>
+      <button class="nav-item" data-section="advisor"><span class="nav-icon" id="ni-advisor"></span>Advisor<span class="nav-badge" style="background:linear-gradient(135deg, #0a84ff, #b14aff); color:white;">new</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="theme-toggle" id="theme-toggle">
+        <button data-theme-set="light" class="active"><span id="tt-light"></span>Light</button>
+        <button data-theme-set="dark"><span id="tt-dark"></span>Dark</button>
+      </div>
+      <div class="profile-chip" id="profile-chip" style="cursor:pointer;" title="Edit profile">
+        <div class="avatar" id="profile-avatar">AC</div>
+        <div>
+          <div class="profile-name" id="profile-name">Loading…</div>
+          <div class="profile-meta" id="profile-meta"></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="section-title" id="topbar-title">Overview</div>
+      </div>
+      <div class="search" id="cmd-trigger" role="button" tabindex="0">
+        <span id="search-icon"></span>
+        <span class="search-placeholder">Search tickers, accounts, news…</span>
+        <span class="search-kbd">⌘K</span>
+      </div>
+      <button class="icon-btn" id="bell-btn" title="Notifications" style="position:relative;"></button>
+      <button class="icon-btn" id="settings-btn" title="Settings"></button>
+    </header>
+
+    <div class="content">
+      <div id="section-overview" class="section active"></div>
+      <div id="section-analyze" class="section"></div>
+      <div id="section-portfolio" class="section"></div>
+      <div id="section-watchlist" class="section"></div>
+      <div id="section-advisor" class="section"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Command palette -->
+<div class="cmdk-overlay" id="cmdk" hidden>
+  <div class="cmdk-panel" role="dialog" aria-label="Command palette">
+    <div class="cmdk-input-row">
+      <span class="cmdk-search-icon" id="cmdk-icon"></span>
+      <input id="cmdk-input" placeholder="Jump to a ticker, account, or section…" autocomplete="off"/>
+      <span class="search-kbd">ESC</span>
+    </div>
+    <div class="cmdk-results" id="cmdk-results"></div>
+  </div>
+</div>
+
+<!-- Notifications panel -->
+<div id="notif-panel" hidden style="
+  position:fixed; top:52px; right:56px; width:340px; z-index:200;
+  background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--r-lg); box-shadow:var(--shadow-pop);
+  overflow:hidden;
+">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--border);">
+    <div style="font-size:14px;font-weight:600;">Notifications</div>
+    <button id="notif-close" class="icon-btn" style="width:24px;height:24px;font-size:16px;">×</button>
+  </div>
+  <div id="notif-list" style="max-height:340px;overflow-y:auto;padding:8px 0;"></div>
+</div>
+
+<!-- Settings panel -->
+<div id="settings-panel" hidden style="
+  position:fixed; top:52px; right:8px; width:360px; z-index:200;
+  background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--r-lg); box-shadow:var(--shadow-pop);
+  overflow:hidden;
+">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--border);">
+    <div style="font-size:14px;font-weight:600;">Settings</div>
+    <button id="settings-close" class="icon-btn" style="width:24px;height:24px;font-size:16px;">×</button>
+  </div>
+  <div style="padding:16px;">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--text-2);margin-bottom:12px;">Profile</div>
+
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Name</label>
+      <input id="s-name" type="text" placeholder="Your name"
+        style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+               background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Age</label>
+        <input id="s-age" type="number" min="18" max="100" placeholder="35"
+          style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Horizon (yrs)</label>
+        <input id="s-horizon" type="number" min="1" max="40" placeholder="10"
+          style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Risk Tolerance</label>
+      <select id="s-risk"
+        style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+               background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;">
+        <option value="conservative">Conservative</option>
+        <option value="moderate">Moderate</option>
+        <option value="aggressive">Aggressive</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Notes</label>
+      <textarea id="s-notes" rows="2" placeholder="Goals, notes…"
+        style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+               background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;
+               resize:vertical;font-family:inherit;"></textarea>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="s-save" class="btn-primary" style="flex:1;">Save changes</button>
+      <div id="s-status" style="font-size:12px;color:var(--green);display:none;">Saved ✓</div>
+    </div>
+  </div>
+</div>
+
+<!-- Data + helpers -->
+<script src="data.js"></script>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="sections-1.js"></script>
+<script src="sections-2.js"></script>
+<script src="command.js"></script>
+<script src="animations.js"></script>
+<script src="sleek.js"></script>
+<script src="tweaks.js"></script>
+
+<script>
+(function init() {
+  // Set nav icons
+  const icons = {
+    "ni-overview": "home", "ni-analyze": "chart", "ni-portfolio": "wallet",
+    "ni-watchlist": "eye", "ni-advisor": "sparkles",
+    "search-icon": "search", "bell-btn": "bell", "settings-btn": "settings",
+    "tt-light": "sun", "tt-dark": "moon",
+  };
+  Object.entries(icons).forEach(([id, name]) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = Icon(name, id.startsWith("ni-") ? 16 : 14);
+  });
+
+  // Hydrate profile chip from real data
+  function hydrateProfileChip() {
+    if (window.NEXUS_DATA && window.NEXUS_DATA.profile) {
+      const p = window.NEXUS_DATA.profile;
+      const av = document.getElementById("profile-avatar");
+      const nm = document.getElementById("profile-name");
+      const mt = document.getElementById("profile-meta");
+      if (av) av.textContent = p.initials || "??";
+      if (nm) nm.textContent = p.name || "—";
+      if (mt) mt.textContent = `${p.risk || "—"} · ${p.horizon || "?"}yr horizon`;
+    }
+  }
+  hydrateProfileChip();
+
+  // Render each section's HTML
+  const titles = {
+    overview: "Overview", analyze: "Analyze", portfolio: "Portfolio",
+    watchlist: "Watchlist", advisor: "Advisor",
+  };
+  document.getElementById("section-overview").innerHTML = AppleSections.renderOverview();
+  document.getElementById("section-analyze").innerHTML = AppleSections.renderAnalyze();
+  document.getElementById("section-portfolio").innerHTML = AppleSections.renderPortfolio();
+  document.getElementById("section-watchlist").innerHTML = AppleSections.renderWatchlist();
+  document.getElementById("section-advisor").innerHTML = AppleSections.renderAdvisor();
+
+  // Update portfolio badge
+  if (window.NEXUS_DATA) {
+    const pb = document.getElementById("badge-portfolio");
+    if (pb) pb.textContent = NEXUS_DATA.positions.length;
+    const wb = document.getElementById("badge-watchlist");
+    if (wb) wb.textContent = NEXUS_DATA.watchlist.length;
+  }
+
+  // Hydrate initial section
+  AppleSections.hydrateOverview();
+
+  let active = "overview";
+
+  function navigateTo(sec) {
+    if (!titles[sec] || sec === active) return;
+    document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.section === sec));
+    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+    const secEl = document.getElementById("section-" + sec);
+    secEl.classList.add("active");
+    document.getElementById("topbar-title").textContent = titles[sec];
+    document.querySelector(".main").scrollTo({ top: 0, behavior: "instant" });
+    active = sec;
+    AppleSections._redraw = null;
+    setTimeout(() => {
+      const fn = AppleSections["hydrate" + sec.charAt(0).toUpperCase() + sec.slice(1)];
+      if (fn) fn();
+      if (window.AppleAnim) { try { AppleAnim.replayAll(); } catch(e){} }
+    }, 60);
+  }
+
+  function flashTicker(ticker) {
+    const inHoldings = NEXUS_DATA.positions.some(p => p.ticker === ticker);
+    const dest = inHoldings ? "portfolio" : "watchlist";
+    navigateTo(dest);
+    setTimeout(() => {
+      const row = document.querySelector(`#section-${dest} [data-row-ticker="${ticker}"]`);
+      if (row) {
+        const main = document.querySelector(".main");
+        const top = row.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 120;
+        main.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        row.classList.add("row-flash");
+        setTimeout(() => row.classList.remove("row-flash"), 1600);
+      }
+    }, 140);
+  }
+
+  window.Nexus = { navigateTo, flashTicker, getActive: () => active };
+
+  if (window.CommandPalette) CommandPalette.init();
+  if (window.NexusTweaks) NexusTweaks.init();
+
+  // One-shot snapshot refresh — repaint P/L + hero + sparklines once the
+  // server has live prices (covers cold-cache first load where plPct=0).
+  (function snapshotRefresh() {
+    const D = window.NEXUS_DATA;
+    if (!D || !D.positions) return;
+    const allZero = D.positions.length > 0 && D.positions.every(p => !p.plPct);
+    let tries = 0;
+    function poll() {
+      tries++;
+      fetch("/api/snapshot")
+        .then(r => r.json())
+        .then(s => {
+          if (!s.ok) return;
+          const stillZero = s.positions.length > 0 && s.positions.every(p => !p.plPct);
+          // Merge enriched fields
+          D.positions = s.positions;
+          D.portfolioValue = s.portfolioValue;
+          D.totalCost = s.totalCost;
+          D.totalPL = s.totalPL;
+          D.totalPLPct = s.totalPLPct;
+          D.netWorth = s.netWorth;
+          D.accounts = s.accounts;
+          D.watchlist = s.watchlist;
+          D.sectorWeights = s.sectorWeights;
+          if (s.advisorPlan) D.advisorPlan = s.advisorPlan;
+          if (s.riskMetrics) D.riskMetrics = s.riskMetrics;
+          // Re-render the sections whose HTML depends on these numbers
+          ["overview","portfolio","watchlist","advisor"].forEach(sec => {
+            const fn = AppleSections["render" + sec.charAt(0).toUpperCase() + sec.slice(1)];
+            const el = document.getElementById("section-" + sec);
+            if (fn && el) el.innerHTML = fn();
+          });
+          // Re-hydrate the active one
+          const hy = AppleSections["hydrate" + active.charAt(0).toUpperCase() + active.slice(1)];
+          if (hy) try { hy(); } catch(e){}
+          if (window.checkWatchlistAlerts) checkWatchlistAlerts();
+          // If server still cold, poll again (max 4 tries)
+          if (stillZero && tries < 4) setTimeout(poll, 2000);
+        })
+        .catch(() => {});
+    }
+    // Always refresh once after paint; sooner if everything is zero
+    setTimeout(poll, allZero ? 1500 : 4000);
+  })();
+
+  // Nav handler
+  document.getElementById("nav").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-section]");
+    if (item) navigateTo(item.dataset.section);
+  });
+
+  // Theme toggle — use View Transitions if available
+  document.getElementById("theme-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-theme-set]");
+    if (!btn) return;
+    const newTheme = btn.dataset.themeSet;
+    const apply = () => {
+      document.querySelectorAll("[data-theme-set]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      document.body.setAttribute("data-theme", newTheme);
+      if (active === "overview") AppleSections.hydrateOverview();
+      else if (active === "analyze") AppleSections.hydrateAnalyze();
+      if (window.NexusTweaks && NexusTweaks.syncTheme) NexusTweaks.syncTheme(newTheme);
+    };
+    if (document.startViewTransition && window.AppleAnim && AppleAnim.state.theme) {
+      const rect = btn.getBoundingClientRect();
+      document.documentElement.style.setProperty("--tx", (rect.left + rect.width / 2) + "px");
+      document.documentElement.style.setProperty("--ty", (rect.top + rect.height / 2) + "px");
+      document.startViewTransition(apply);
+    } else {
+      apply();
+    }
+  });
+
+  // Profile chip → open settings
+  document.getElementById("profile-chip").addEventListener("click", () => {
+    openSettings();
+  });
+
+  // Resize
+  let rzTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(rzTimer);
+    rzTimer = setTimeout(() => {
+      if (AppleSections._redraw) AppleSections._redraw();
+    }, 160);
+  });
+
+  // -----------------------------------------------------------------------
+  // Notifications panel
+  // -----------------------------------------------------------------------
+  const notifPanel = document.getElementById("notif-panel");
+  const bellBtn = document.getElementById("bell-btn");
+
+  function buildNotifications() {
+    const list = document.getElementById("notif-list");
+    const D = window.NEXUS_DATA;
+    if (!D || !list) return;
+    const items = [];
+    (D.watchlist || []).forEach(w => {
+      if (w.buyBelow && w.price > 0 && w.price <= w.buyBelow) {
+        items.push({ type: "buy", ticker: w.ticker, msg: `Price ${fmt$(w.price)} hit buy target ≤ ${fmt$(w.buyBelow)}`, color: "var(--green)" });
+      } else if (w.sellAbove && w.price > 0 && w.price >= w.sellAbove) {
+        items.push({ type: "sell", ticker: w.ticker, msg: `Price ${fmt$(w.price)} hit sell target ≥ ${fmt$(w.sellAbove)}`, color: "var(--red)" });
+      }
+    });
+    if (items.length === 0) {
+      list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:13px;">No alerts triggered</div>`;
+    } else {
+      list.innerHTML = items.map(it => `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);">
+          <div style="width:8px;height:8px;border-radius:50%;background:${it.color};margin-top:5px;flex-shrink:0;"></div>
+          <div>
+            <div style="font-size:13px;font-weight:600;">${it.ticker}</div>
+            <div style="font-size:12px;color:var(--text-2);">${it.msg}</div>
+          </div>
+        </div>
+      `).join("");
+      // Show alert dot on bell
+      bellBtn.style.setProperty("--notif-count", items.length);
+    }
+    // Always show watchlist as monitoring if no alerts
+    if (items.length === 0) {
+      const monitoring = (D.watchlist || []).slice(0, 5);
+      if (monitoring.length) {
+        list.innerHTML = monitoring.map(w => `
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);">
+            <div style="width:8px;height:8px;border-radius:50%;background:var(--amber);margin-top:5px;flex-shrink:0;"></div>
+            <div>
+              <div style="font-size:13px;font-weight:600;">${w.ticker}</div>
+              <div style="font-size:12px;color:var(--text-2);">
+                Monitoring${w.buyBelow ? ' · Buy ≤ ' + fmt$(w.buyBelow) : ''}${w.sellAbove ? ' · Sell ≥ ' + fmt$(w.sellAbove) : ''}
+              </div>
+            </div>
+          </div>
+        `).join("") + `<div style="padding:10px 16px;font-size:12px;color:var(--text-3);">No price targets hit yet</div>`;
+      }
+    }
+  }
+
+  // Red badge on the bell when alerts are live
+  function setBellBadge(n) {
+    let dot = bellBtn.querySelector(".bell-badge");
+    if (n > 0) {
+      if (!dot) {
+        dot = document.createElement("span");
+        dot.className = "bell-badge";
+        dot.style.cssText = "position:absolute;top:4px;right:4px;min-width:14px;height:14px;padding:0 3px;border-radius:8px;background:var(--red);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;";
+        bellBtn.appendChild(dot);
+      }
+      dot.textContent = n > 9 ? "9+" : String(n);
+    } else if (dot) { dot.remove(); }
+  }
+
+  // Fire OS notifications for newly-hit targets (dedup via localStorage)
+  function checkWatchlistAlerts() {
+    const D = window.NEXUS_DATA;
+    if (!D || !D.watchlist) return;
+    const hits = D.watchlist.filter(w =>
+      (w.buyBelow && w.price > 0 && w.price <= w.buyBelow) ||
+      (w.sellAbove && w.price > 0 && w.price >= w.sellAbove));
+    setBellBadge(hits.length);
+    if (!hits.length || !("Notification" in window) || Notification.permission !== "granted") return;
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem("nexus_alerts_seen") || "{}"); } catch {}
+    hits.forEach(w => {
+      const kind = (w.buyBelow && w.price <= w.buyBelow) ? "buy" : "sell";
+      const key = w.ticker + ":" + kind + ":" + (kind === "buy" ? w.buyBelow : w.sellAbove);
+      if (seen[key]) return;
+      seen[key] = Date.now();
+      new Notification(`${w.ticker} hit ${kind} target`, {
+        body: kind === "buy" ? `Now ${fmt$(w.price)} ≤ buy ${fmt$(w.buyBelow)}` : `Now ${fmt$(w.price)} ≥ sell ${fmt$(w.sellAbove)}`,
+      });
+    });
+    try { localStorage.setItem("nexus_alerts_seen", JSON.stringify(seen)); } catch {}
+  }
+  window.checkWatchlistAlerts = checkWatchlistAlerts;
+  checkWatchlistAlerts();
+
+  bellBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().then(checkWatchlistAlerts);
+    }
+    const isHidden = notifPanel.hidden;
+    notifPanel.hidden = !isHidden;
+    if (!isHidden) return;
+    settingsPanel.hidden = true;
+    buildNotifications();
+  });
+  document.getElementById("notif-close").addEventListener("click", () => { notifPanel.hidden = true; });
+
+  // -----------------------------------------------------------------------
+  // Settings panel
+  // -----------------------------------------------------------------------
+  const settingsPanel = document.getElementById("settings-panel");
+
+  function openSettings() {
+    settingsPanel.hidden = false;
+    notifPanel.hidden = true;
+    const D = window.NEXUS_DATA;
+    if (D && D.profile) {
+      const p = D.profile;
+      document.getElementById("s-name").value = p.name || "";
+      document.getElementById("s-age").value = p.age || "";
+      document.getElementById("s-horizon").value = p.horizon || "";
+      document.getElementById("s-risk").value = (p.risk || "moderate").toLowerCase();
+      document.getElementById("s-notes").value = p.notes || "";
+    }
+  }
+
+  document.getElementById("settings-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!settingsPanel.hidden) { settingsPanel.hidden = true; return; }
+    openSettings();
+  });
+  document.getElementById("settings-close").addEventListener("click", () => { settingsPanel.hidden = true; });
+
+  document.getElementById("s-save").addEventListener("click", () => {
+    const payload = {
+      name: document.getElementById("s-name").value.trim(),
+      age: parseInt(document.getElementById("s-age").value) || 35,
+      horizon_years: parseInt(document.getElementById("s-horizon").value) || 10,
+      risk_tolerance: document.getElementById("s-risk").value,
+      notes: document.getElementById("s-notes").value.trim(),
+    };
+    fetch("/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(resp => {
+      if (resp.ok && window.NEXUS_DATA) {
+        // Update local data
+        const p = NEXUS_DATA.profile;
+        p.name = payload.name || p.name;
+        p.age = payload.age;
+        p.horizon = payload.horizon_years;
+        p.risk = payload.risk_tolerance.charAt(0).toUpperCase() + payload.risk_tolerance.slice(1);
+        p.notes = payload.notes;
+        const parts = payload.name.split(" ");
+        p.initials = parts.map(w => w[0]).join("").toUpperCase().slice(0, 2);
+        hydrateProfileChip();
+        const status = document.getElementById("s-status");
+        status.style.display = "block";
+        setTimeout(() => { status.style.display = "none"; }, 2500);
+      }
+    })
+    .catch(() => {});
+  });
+
+  // Close panels on outside click
+  document.addEventListener("click", (e) => {
+    if (!notifPanel.hidden && !notifPanel.contains(e.target) && e.target !== bellBtn) {
+      notifPanel.hidden = true;
+    }
+    if (!settingsPanel.hidden && !settingsPanel.contains(e.target) &&
+        e.target !== document.getElementById("settings-btn") &&
+        !document.getElementById("settings-btn").contains(e.target)) {
+      settingsPanel.hidden = true;
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

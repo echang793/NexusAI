@@ -6,6 +6,7 @@ import os
 PROFILE_FILE = os.getenv("PROFILE_FILE", "profile.json")
 
 DEFAULTS = {
+    "name": "",
     "risk_tolerance": "moderate",
     "horizon_years": 10,
     "goals": ["retirement"],
@@ -75,8 +76,10 @@ def _coerce(p):
 
     emergency = bool(p.get("emergency_fund", DEFAULTS["emergency_fund"]))
     notes = str(p.get("notes", "")).strip()
+    name = str(p.get("name", DEFAULTS["name"])).strip()
 
     return {
+        "name": name,
         "risk_tolerance": risk,
         "horizon_years": horizon,
         "goals": goals,

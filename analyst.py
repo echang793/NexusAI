@@ -26,7 +26,9 @@ SYSTEM_PROMPT = (
     "When a BUY action is suggested for a new position, briefly note whether to "
     "buy all at once or dollar-cost average across tranches and why. "
     "You are not a fiduciary and your output is educational, not personalized "
-    "financial advice. Always respond with valid JSON only — no markdown, no prose outside JSON."
+    "financial advice. For every ticker analysis include a bull case, a bear case, "
+    "and a final recommendation summarizing your view. "
+    "Always respond with valid JSON only — no markdown, no prose outside JSON."
 )
 
 _TICKER_SCHEMA = {
@@ -42,11 +44,14 @@ _TICKER_SCHEMA = {
         "news_summary": {"type": "string"},
         "risks": {"type": "array", "items": {"type": "string"}},
         "catalysts": {"type": "array", "items": {"type": "string"}},
+        "bull_case": {"type": "string"},
+        "bear_case": {"type": "string"},
+        "recommendation": {"type": "string"},
     },
     "required": [
         "signal", "action", "trim_pct", "confidence", "thesis",
         "technical_summary", "fundamental_summary", "news_summary",
-        "risks", "catalysts",
+        "risks", "catalysts", "bull_case", "bear_case", "recommendation",
     ],
 }
 
@@ -67,7 +72,10 @@ _TICKER_PROMPT = (
     "trim_pct (integer 0-99, non-zero only when action=trim_partial), "
     "confidence (low/medium/high), thesis (2-4 sentence verdict including DCA guidance if BUY), "
     "technical_summary (string), fundamental_summary (string), "
-    "news_summary (string), risks (array of strings), catalysts (array of strings). "
+    "news_summary (string), risks (array of strings), catalysts (array of strings), "
+    "bull_case (2-3 upside drivers as one string), "
+    "bear_case (2-3 downside risks as one string), "
+    "recommendation (1-2 sentence final call). "
     "No other text — only the JSON object."
 )
 
@@ -91,6 +99,9 @@ _REQUIRED_TICKER_FIELDS = {
     "news_summary": "",
     "risks": [],
     "catalysts": [],
+    "bull_case": "",
+    "bear_case": "",
+    "recommendation": "",
 }
 
 _REQUIRED_PORTFOLIO_FIELDS = {
@@ -274,9 +285,66 @@ def _fallback_ticker(ticker, snapshot, position, tech_signal, tech_reason):
         action = {"BUY": "buy", "SELL": "sell_full", "HOLD": "hold"}.get(signal, "hold")
 
     trim_pct = config.TRIM_DEFAULT_PCT if action == "trim_partial" else 0
-    thesis = f"Rule-based: {tech_reason}"
+    thesis = f"Rule-based signal: {tech_reason}"
     if position and gain_pct is not None:
         thesis += f" Position is {gain_pct:+.1f}% vs cost."
+
+    # Rule-based risks + catalysts from snapshot indicators
+    snap = snapshot or {}
+    rsi = snap.get("RSI")
+    sma50 = snap.get("SMA50")
+    sma200 = snap.get("SMA200")
+    macd = snap.get("MACD")
+    macd_sig = snap.get("MACD_signal")
+
+    risks: list[str] = []
+    catalysts: list[str] = []
+
+    def _valid(v):
+        return v is not None and v == v  # not NaN
+
+    if _valid(rsi):
+        if rsi > 70:
+            risks.append(f"RSI overbought at {rsi:.1f} — momentum may be exhausted, pullback risk")
+        elif rsi > 60:
+            risks.append(f"RSI at {rsi:.1f} — approaching overbought territory")
+        elif rsi < 30:
+            catalysts.append(f"RSI oversold at {rsi:.1f} — historically strong mean-reversion setup")
+        elif rsi < 45:
+            catalysts.append(f"RSI at {rsi:.1f} — not extended, technical room to run")
+
+    if _valid(sma50) and _valid(sma200):
+        if sma50 > sma200:
+            catalysts.append(
+                f"Golden cross: SMA50 ${sma50:.2f} above SMA200 ${sma200:.2f} — bullish trend intact"
+            )
+        else:
+            risks.append(
+                f"Death cross: SMA50 ${sma50:.2f} below SMA200 ${sma200:.2f} — bearish trend structure"
+            )
+
+    if _valid(macd) and _valid(macd_sig):
+        if macd > macd_sig:
+            catalysts.append("MACD above signal line — positive momentum crossover")
+        else:
+            risks.append("MACD below signal line — weakening momentum")
+
+    # Bull / bear case summaries
+    bull_case = (
+        "; ".join(catalysts)
+        if catalysts
+        else "No strong bullish technical signals identified at this time"
+    )
+    bear_case = (
+        "; ".join(risks)
+        if risks
+        else "No strong bearish technical signals identified at this time"
+    )
+    recommendation = (
+        f"{signal} — {tech_reason} "
+        f"Confidence: low (rule-based only, no LLM configured). "
+        f"{'Consider reducing position size given gain.' if gain_pct and gain_pct > 25 else ''}"
+    ).strip()
 
     return {
         "signal": signal,
@@ -287,8 +355,11 @@ def _fallback_ticker(ticker, snapshot, position, tech_signal, tech_reason):
         "technical_summary": tech_reason,
         "fundamental_summary": "Fundamentals not analyzed (no LLM configured).",
         "news_summary": "News not analyzed (no LLM configured).",
-        "risks": [],
-        "catalysts": [],
+        "risks": risks,
+        "catalysts": catalysts,
+        "bull_case": bull_case,
+        "bear_case": bear_case,
+        "recommendation": recommendation,
         "source": "fallback",
     }
 
@@ -1038,3 +1109,54 @@ def chat_with_advisor(messages, profile, valuation, plan):
         "content": f"⚠️ Unable to reach an LLM right now. {err_msg}",
         "source": "error",
     }
+
+
+def stream_chat_reply(messages, profile, valuation, plan):
+    """Generator yielding reply text chunks as they're produced.
+
+    Streams from Ollama token-by-token. On any failure, falls back to the
+    non-streaming chat_with_advisor() and yields its full reply as one chunk.
+    """
+    context = _build_chat_context(profile, valuation, plan)
+    system_text = _CHAT_SYSTEM_PROMPT + "\n\n" + context
+    trimmed = _trim_chat_history(messages, max_turns=10)
+
+    if config.LLM_BACKEND == "ollama":
+        payload = {
+            "model": config.OLLAMA_MODEL,
+            "messages": [{"role": "system", "content": system_text}] + trimmed,
+            "stream": True,
+            "options": {"temperature": 0.4, "num_predict": 600},
+        }
+        req = urllib.request.Request(
+            f"{config.OLLAMA_HOST}/api/chat",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        got_any = False
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                for line in resp:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    chunk = (obj.get("message") or {}).get("content", "")
+                    if chunk:
+                        got_any = True
+                        yield chunk
+                    if obj.get("done"):
+                        break
+            if got_any:
+                return
+        except Exception:
+            if got_any:
+                return  # partial stream already sent; don't double up
+
+    # Fallback: non-streaming path (Anthropic / rule-based / error)
+    result = chat_with_advisor(messages, profile, valuation, plan)
+    yield result.get("content", "Sorry, I could not generate a response.")

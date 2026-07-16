@@ -24,6 +24,7 @@ from indicators import (
     sortino_ratio,
 )
 from news import company_news, market_news
+import accounts as ac
 import portfolio as pf
 import profile as pr
 import watchlist as wl
@@ -238,7 +239,7 @@ def render_fundamentals(fund, div_info=None, earnings_info=None):
         [(k, "n/a" if v is None else v) for k, v in rows],
         columns=["Metric", "Value"],
     )
-    st.dataframe(table, hide_index=True, use_container_width=True)
+    st.dataframe(table, hide_index=True, width="stretch")
 
 
 def render_news(items, empty_msg):
@@ -300,8 +301,8 @@ def _parallel_verdicts(positions, period_str, progress_label="Analyzing"):
 # --- Main ------------------------------------------------------------------
 st.title("Stock Picker & AI Financial Advisor")
 
-tab_analyze, tab_portfolio, tab_watchlist, tab_advisor = st.tabs(
-    ["Analyze", "Portfolio", "Watchlist", "Advisor"]
+tab_analyze, tab_portfolio, tab_networth, tab_watchlist, tab_advisor = st.tabs(
+    ["Analyze", "Portfolio", "Net Worth", "Watchlist", "Advisor"]
 )
 
 # ===========================================================================
@@ -430,7 +431,7 @@ with tab_portfolio:
     edited = st.data_editor(
         base,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key="holdings_editor",
         column_config={
             "ticker": st.column_config.TextColumn("Ticker"),
@@ -486,7 +487,7 @@ with tab_portfolio:
                 }
                 for p in val["positions"]
             ])
-            st.dataframe(table, hide_index=True, use_container_width=True)
+            st.dataframe(table, hide_index=True, width="stretch")
 
             # --- Risk Metrics ---
             st.subheader("Risk Metrics")
@@ -516,7 +517,7 @@ with tab_portfolio:
 
             if risk_rows:
                 st.caption("Based on selected history period. Sharpe/Sortino use 4.5% risk-free rate.")
-                st.dataframe(pd.DataFrame(risk_rows), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(risk_rows), hide_index=True, width="stretch")
 
             # Portfolio-level risk
             if len(all_returns) >= 2:
@@ -570,7 +571,7 @@ with tab_portfolio:
 
                     st.dataframe(
                         corr.style.map(_corr_color).format("{:.2f}"),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
             # --- Per-Position Advice (parallel) ---
@@ -599,6 +600,90 @@ with tab_portfolio:
                 st.markdown("**Rebalancing Suggestions**")
                 for r in passessment["rebalancing"]:
                     st.markdown(f"- {r}")
+
+
+# ===========================================================================
+# NET WORTH TAB
+# ===========================================================================
+with tab_networth:
+    st.subheader("Net Worth")
+    st.caption(
+        "Track other money accounts (HYSA, HSA, checking, crypto, real estate) "
+        "and debts (credit cards, loans). Combined with brokerage holdings to "
+        "compute total net worth."
+    )
+
+    if "accounts" not in st.session_state:
+        st.session_state.accounts = ac.load_accounts()
+
+    base_acc = pd.DataFrame(st.session_state.accounts, columns=ac.COLUMNS)
+    if base_acc.empty:
+        base_acc = pd.DataFrame([{"name": "", "type": "HYSA", "balance": 0.0, "notes": ""}])
+
+    edited_acc = st.data_editor(
+        base_acc,
+        num_rows="dynamic",
+        width="stretch",
+        key="accounts_editor",
+        column_config={
+            "name": st.column_config.TextColumn("Name", help="e.g. Ally HYSA, Fidelity HSA"),
+            "type": st.column_config.SelectboxColumn("Type", options=ac.ALL_TYPES, required=True),
+            "balance": st.column_config.NumberColumn("Balance", format="$%.2f"),
+            "notes": st.column_config.TextColumn("Notes"),
+        },
+    )
+
+    acc_c1, acc_c2 = st.columns([1, 3])
+    with acc_c1:
+        if st.button("Save accounts", type="primary", key="save_accounts"):
+            st.session_state.accounts = ac.save_accounts(edited_acc.to_dict("records"))
+            st.success("Saved to accounts.json")
+
+    accounts_now = ac._coerce(edited_acc.to_dict("records"))
+    summary = ac.summarize(accounts_now)
+
+    # Brokerage value (from current holdings if available, else 0)
+    nw_holdings = pf._coerce(st.session_state.get("holdings", []) or pf.load_portfolio())
+    brokerage_value = 0.0
+    if nw_holdings:
+        with st.spinner("Pricing brokerage holdings..."):
+            try:
+                val_nw = pf.value_portfolio(nw_holdings)
+                brokerage_value = val_nw.get("total_value", 0.0) or 0.0
+            except Exception as e:
+                st.warning(f"Could not price brokerage holdings: {e}")
+
+    nw = ac.net_worth(brokerage_value, summary)
+
+    st.divider()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Investments", f"${nw['investments']:,.2f}")
+    m2.metric("Other Assets", f"${nw['other_assets']:,.2f}")
+    m3.metric("Liabilities", f"${nw['total_liabilities']:,.2f}")
+    m4.metric("Net Worth", f"${nw['net_worth']:,.2f}")
+
+    if summary["by_type"]:
+        st.subheader("Breakdown by Type")
+        bd_rows = []
+        denom = nw["total_assets"] + nw["total_liabilities"]
+        for t, bal in sorted(summary["by_type"].items(), key=lambda x: -abs(x[1])):
+            kind = "Liability" if ac.is_liability(t) else "Asset"
+            share = (abs(bal) / denom * 100.0) if denom else 0.0
+            bd_rows.append({
+                "Type": t,
+                "Kind": kind,
+                "Balance": bal,
+                "% of Gross": round(share, 1),
+            })
+        if brokerage_value > 0:
+            share_b = (brokerage_value / denom * 100.0) if denom else 0.0
+            bd_rows.insert(0, {
+                "Type": "Brokerage (stocks)",
+                "Kind": "Asset",
+                "Balance": brokerage_value,
+                "% of Gross": round(share_b, 1),
+            })
+        st.dataframe(pd.DataFrame(bd_rows), hide_index=True, width="stretch")
 
 
 # ===========================================================================
@@ -657,7 +742,7 @@ with tab_watchlist:
                 "Note": item.get("note", ""),
             })
 
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
         st.divider()
         # Remove entry
@@ -808,7 +893,7 @@ with tab_advisor:
                 }
                 for r in ta
             ])
-            st.dataframe(ta_df, hide_index=True, use_container_width=True)
+            st.dataframe(ta_df, hide_index=True, width="stretch")
 
         # --- Current vs Target ---
         cvt = plan.get("current_vs_target", [])
@@ -847,7 +932,7 @@ with tab_advisor:
 
             st.dataframe(
                 cvt_df.style.map(_color_gap, subset=["Gap %"]),
-                hide_index=True, use_container_width=True,
+                hide_index=True, width="stretch",
             )
 
         # --- Action Items ---

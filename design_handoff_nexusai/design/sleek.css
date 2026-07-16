@@ -1,0 +1,191 @@
+/* =====================================================
+   NexusAI · Sleek layer
+   Aurora field, frosted glass, spotlight, sheen, comet.
+   Every feature gated on a body[data-anim-*] attribute
+   so the Tweaks panel can toggle each one live.
+   ===================================================== */
+
+/* Keep app chrome above the aurora field */
+.app { position: relative; z-index: 1; }
+
+/* =================== Aurora background =================== */
+.aurora-layer {
+  position: fixed; inset: -12%;
+  z-index: 0; pointer-events: none;
+  filter: blur(90px) saturate(1.15);
+}
+.aurora-blob {
+  position: absolute; border-radius: 50%;
+  opacity: 0.5; will-change: transform;
+}
+.aurora-blob.b1 {
+  width: 46vw; height: 46vw; left: -9%; top: -14%;
+  background: radial-gradient(circle at 35% 35%, #8db9f5, transparent 66%);
+  animation: auroraDrift1 26s ease-in-out infinite alternate;
+}
+.aurora-blob.b2 {
+  width: 40vw; height: 40vw; right: -8%; top: 2%;
+  background: radial-gradient(circle at 60% 40%, #e3aaf2, transparent 66%);
+  animation: auroraDrift2 33s ease-in-out infinite alternate;
+}
+.aurora-blob.b3 {
+  width: 52vw; height: 52vw; left: 26%; bottom: -26%;
+  background: radial-gradient(circle at 50% 50%, #a6e6cf, transparent 66%);
+  animation: auroraDrift3 39s ease-in-out infinite alternate;
+}
+.aurora-blob.b4 {
+  width: 24vw; height: 24vw; left: 42%; top: -8%;
+  background: radial-gradient(circle at 50% 50%, #fed1a1, transparent 66%);
+  animation: auroraDrift2 22s ease-in-out infinite alternate-reverse;
+}
+[data-theme="dark"] .aurora-blob { opacity: 0.42; }
+[data-theme="dark"] .aurora-blob.b1 { background: radial-gradient(circle at 35% 35%, #1d4ed8, transparent 66%); }
+[data-theme="dark"] .aurora-blob.b2 { background: radial-gradient(circle at 60% 40%, #7c3aed, transparent 66%); }
+[data-theme="dark"] .aurora-blob.b3 { background: radial-gradient(circle at 50% 50%, #065f46, transparent 66%); }
+[data-theme="dark"] .aurora-blob.b4 { background: radial-gradient(circle at 50% 50%, #9f1239, transparent 66%); }
+
+@keyframes auroraDrift1 {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(9vw, 7vh) scale(1.18); }
+}
+@keyframes auroraDrift2 {
+  from { transform: translate(0, 0) scale(1.1); }
+  to   { transform: translate(-7vw, 9vh) scale(0.92); }
+}
+@keyframes auroraDrift3 {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(-9vw, -8vh) scale(1.14); }
+}
+body[data-anim-aurora="off"] .aurora-layer { display: none; }
+
+/* Brand mark slowly cycles hue while the aurora is alive */
+body[data-anim-aurora="on"] .brand-mark { animation: brandHue 14s linear infinite; }
+@keyframes brandHue { to { filter: hue-rotate(360deg); } }
+
+/* =================== Frosted glass surfaces =================== */
+body[data-anim-glass="on"] .card:not(.hero) {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.55));
+  -webkit-backdrop-filter: blur(26px) saturate(1.6);
+  backdrop-filter: blur(26px) saturate(1.6);
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), var(--shadow-card);
+}
+body[data-theme="dark"][data-anim-glass="on"] .card:not(.hero) {
+  background: linear-gradient(180deg, rgba(38, 38, 42, 0.62), rgba(24, 24, 28, 0.55));
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), var(--shadow-card);
+}
+/* Gradient hairline ring */
+body[data-anim-glass="on"] .card:not(.hero)::before {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; padding: 1px;
+  background: linear-gradient(160deg,
+    rgba(255, 255, 255, 0.95),
+    rgba(255, 255, 255, 0.15) 30%,
+    rgba(0, 0, 0, 0.05) 70%,
+    rgba(255, 255, 255, 0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  pointer-events: none; z-index: 2;
+}
+body[data-theme="dark"][data-anim-glass="on"] .card:not(.hero)::before {
+  background: linear-gradient(160deg,
+    rgba(255, 255, 255, 0.28),
+    rgba(255, 255, 255, 0.04) 30%,
+    rgba(255, 255, 255, 0.02) 70%,
+    rgba(255, 255, 255, 0.14));
+}
+/* Frosted chrome: topbar + sidebar pick up the aurora */
+body[data-anim-glass="on"] .topbar {
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+}
+body[data-theme="dark"][data-anim-glass="on"] .topbar {
+  background: rgba(16, 16, 18, 0.5);
+}
+body[data-anim-glass="on"] .sidebar {
+  background: rgba(252, 252, 253, 0.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+}
+body[data-theme="dark"][data-anim-glass="on"] .sidebar {
+  background: rgba(18, 18, 20, 0.55);
+}
+
+/* =================== Cursor spotlight =================== */
+body[data-anim-spotlight="on"] .card { position: relative; }
+body[data-anim-spotlight="on"] .card::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; pointer-events: none; z-index: 1;
+  background: radial-gradient(420px circle at var(--mx, -300px) var(--my, -300px),
+    var(--accent-soft) 0%, transparent 55%);
+  opacity: 0;
+  transition: opacity 350ms ease;
+}
+body[data-anim-spotlight="on"] .card:hover::after,
+body[data-anim-spotlight="on"] .card.spotlight-demo::after { opacity: 1; }
+
+/* =================== 3D hero tilt =================== */
+body[data-anim-tilt="on"] .card.hero {
+  will-change: transform;
+  transition: transform 600ms var(--anim-spring), box-shadow 600ms var(--anim-ease);
+}
+body[data-anim-tilt="on"] .card.hero.tilting {
+  transition: box-shadow 300ms var(--anim-ease);
+  box-shadow: var(--shadow-pop);
+}
+
+/* =================== Sheen sweep =================== */
+.sheen-streak {
+  position: absolute; inset: 0;
+  border-radius: inherit; overflow: hidden;
+  pointer-events: none; z-index: 3;
+  display: block;
+}
+.sheen-streak::before {
+  content: ""; position: absolute;
+  top: -60%; bottom: -60%; width: 45%; left: -70%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.45) 50%, transparent);
+  transform: skewX(-18deg);
+  animation: sheenSweep calc(950ms / var(--anim-speed)) ease-out var(--sd, 0ms) both;
+}
+[data-theme="dark"] .sheen-streak::before {
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.14) 50%, transparent);
+}
+@keyframes sheenSweep { to { left: 135%; } }
+body[data-anim-sheen="off"] .sheen-streak { display: none; }
+
+/* =================== Chart comet =================== */
+.chart-comet .comet-core { fill: var(--accent); }
+.chart-comet .comet-halo {
+  fill: var(--accent); opacity: 0.22;
+  animation: cometPulse 2.4s ease-in-out infinite;
+}
+@keyframes cometPulse {
+  0%, 100% { r: 8; opacity: 0.22; }
+  50%      { r: 13; opacity: 0.08; }
+}
+
+/* =================== Iridescent hero number =================== */
+body[data-anim-herograd="on"] .hero-value:not(.counting) {
+  background: linear-gradient(100deg,
+    var(--text) 0%, var(--text) 28%,
+    var(--accent) 46%, #b14aff 58%,
+    var(--text) 76%, var(--text) 100%);
+  background-size: 320% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: heroGradShift 11s ease-in-out infinite;
+}
+@keyframes heroGradShift {
+  0%, 100% { background-position: 110% 0; }
+  50%      { background-position: -10% 0; }
+}
+/* One fast sweep for the replay button */
+body[data-anim-herograd="on"] .hero-value.herograd-burst:not(.counting) {
+  animation: heroGradShift calc(1300ms / var(--anim-speed)) ease-in-out 1;
+}

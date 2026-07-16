@@ -9,7 +9,7 @@ import pandas as pd
 import config
 from data import get_fundamentals, latest_price
 
-COLUMNS = ["ticker", "shares", "avg_cost"]
+COLUMNS = ["ticker", "shares", "avg_cost", "account"]
 
 
 # --- Persistence -----------------------------------------------------------
@@ -36,7 +36,13 @@ def save_portfolio(holdings, path=None):
 
 
 def _coerce(rows):
-    """Normalize arbitrary row input into clean holding dicts."""
+    """Normalize arbitrary row input into clean holding dicts.
+
+    "account" is optional (which real account a row came from — e.g. two
+    different accounts can legitimately hold the same ticker as separate
+    rows). Rows without it default to "" and fall back to ticker-based
+    guessing elsewhere (server._infer_account).
+    """
     out = []
     for r in rows or []:
         ticker = str(r.get("ticker", "")).strip().upper()
@@ -55,7 +61,8 @@ def _coerce(rows):
             continue
         if shares <= 0:
             continue
-        out.append({"ticker": ticker, "shares": shares, "avg_cost": avg_cost})
+        account = str(r.get("account", "") or "").strip()
+        out.append({"ticker": ticker, "shares": shares, "avg_cost": avg_cost, "account": account})
     return out
 
 

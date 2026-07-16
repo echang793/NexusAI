@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: refresh NexusAI prices/risk/Plaid balances every day.
+
+  Install:
+    1. Edit the two paths below if your project lives elsewhere.
+    2. cp scripts/com.nexusai.dailyrefresh.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.nexusai.dailyrefresh.plist
+  Verify:    launchctl list | grep nexusai
+  Run now:   launchctl start com.nexusai.dailyrefresh
+  Uninstall: launchctl unload ~/Library/LaunchAgents/com.nexusai.dailyrefresh.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexusai.dailyrefresh</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/erichang/Desktop/NexusAI/.venv/bin/python3</string>
+    <string>/Users/erichang/Desktop/NexusAI/scripts/daily_refresh.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/erichang/Desktop/NexusAI</string>
+
+  <!-- Fire every day at 07:30 (also catches up at next login if asleep) -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/erichang/Desktop/NexusAI/scripts/daily_refresh.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/erichang/Desktop/NexusAI/scripts/daily_refresh.log</string>
+</dict>
+</plist>
