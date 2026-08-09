@@ -1385,6 +1385,20 @@ def api_sync_balances():
     return jsonify(result)
 
 
+@app.route("/api/refresh", methods=["POST"])
+def api_refresh():
+    """Invalidate the in-memory cache so the next request rebuilds from disk.
+
+    Scripts that write portfolio.json/accounts.json directly (apply_snapshot.py,
+    import_holdings.py) run in a separate process from this server — writing
+    files doesn't touch this process's _data_cache, so without this endpoint
+    the live dashboard silently serves stale data for up to _DATA_TTL.
+    """
+    global _data_cache_ts
+    _data_cache_ts = 0.0
+    return jsonify({"ok": True})
+
+
 @app.route("/api/watchlist", methods=["POST"])
 def api_save_watchlist():
     body = request.get_json(force=True) or {}

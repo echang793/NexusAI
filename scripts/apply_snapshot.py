@@ -166,6 +166,18 @@ def main() -> int:
     data = server.build_nexus_data(force=True)
     print(f"Snapshot applied: net worth ${data['netWorth']:,.0f} "
           f"({len(data['netWorthHistory'])} points in history)")
+
+    # If a live server is running (a separate process — writing files here
+    # doesn't touch its in-memory cache), tell it to invalidate so the
+    # dashboard doesn't keep serving stale data for up to _DATA_TTL.
+    try:
+        import urllib.request
+        port = os.environ.get("PORT", "5001")
+        req = urllib.request.Request(f"http://localhost:{port}/api/refresh", method="POST")
+        urllib.request.urlopen(req, timeout=2)
+        print(f"Live server on :{port} cache invalidated.")
+    except Exception:
+        pass  # no server running (e.g. headless daily job) — fine, nothing to notify
     return 0
 
 
