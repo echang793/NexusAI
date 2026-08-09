@@ -244,7 +244,13 @@
 
   function refreshDonut() {
     const segs = accountSegments();
-    renderDonut(document.getElementById("ow-donut"), segs, {
+    // Segments under ~1% render as a disproportionate blob rather than a
+    // thin sliver, since stroke-width (20px) dwarfs their arc length —
+    // drop them from the ring itself (they're still listed below with
+    // their real %); the resulting gap is smaller and less distracting
+    // than the blob was.
+    const ringSegs = segs.filter(s => D.netWorth && (s.value / D.netWorth) >= 0.01);
+    renderDonut(document.getElementById("ow-donut"), ringSegs, {
       size: 200, stroke: 20, label: "NET WORTH", center: fmt$(D.netWorth, { compact: true }),
     });
     const legend = document.getElementById("ow-donut-legend");

@@ -302,8 +302,11 @@
         })
         .catch(() => {});
     }
-    // Always refresh once after paint; sooner if everything is zero
-    setTimeout(poll, allZero ? 1500 : 4000);
+    // Only poll when the cache was actually cold (plPct=0 everywhere) —
+    // otherwise this refetch+full-rerender fired on every single page
+    // load regardless of whether there was anything new, causing a
+    // visible flash/"double reload" feel even on a warm cache.
+    if (allZero) setTimeout(poll, 1500);
   })();
 
   // Nav handler
