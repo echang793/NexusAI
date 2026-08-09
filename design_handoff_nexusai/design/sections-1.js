@@ -47,7 +47,7 @@
           <div class="flex-between mb-m">
             <div>
               <div style="font-size:15px; font-weight:600;">Allocation</div>
-              <div class="muted" style="font-size:12px; margin-top:2px;">By account type</div>
+              <div class="muted" style="font-size:12px; margin-top:2px;">By platform</div>
             </div>
           </div>
           <div style="display:flex; justify-content:center;">
@@ -222,10 +222,24 @@
     }
   }
 
-  const ACCT_COLORS = { Taxable:"#0a84ff", Retirement:"#30d158", Cash:"#ff9f0a", Crypto:"#b14aff" };
+  // Colored by platform/institution, not account type — so e.g. Fidelity 401(k)
+  // and Fidelity HSA share a color distinct from Webull Brokerage/Roth, and
+  // plain bank cash (Checking) gets its own color rather than blending in.
+  const INSTITUTION_COLORS = { Fidelity:"#30d158", Webull:"#0a84ff", Checking:"#ff9f0a", Crypto:"#b14aff" };
 
   function accountSegments() {
-    return D.accounts.map(a => ({ label: a.name, value: a.balance, color: ACCT_COLORS[a.type] || "#8e8e93" }));
+    const segs = D.accounts.map(a => ({
+      label: a.name, value: a.balance, institution: a.institution || "Other",
+      color: INSTITUTION_COLORS[a.institution] || "#8e8e93",
+    }));
+    // Group by institution (so the ring draws one solid arc per platform
+    // instead of alternating slivers), largest platform first; within each
+    // group, largest account first.
+    const totals = {};
+    segs.forEach(s => { totals[s.institution] = (totals[s.institution] || 0) + s.value; });
+    return segs.sort((a, b) =>
+      totals[b.institution] - totals[a.institution] || b.value - a.value
+    );
   }
 
   function refreshDonut() {
