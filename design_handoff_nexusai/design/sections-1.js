@@ -13,8 +13,23 @@
     const now = hist[hist.length - 1].value;
     const delta = now - start;
     const deltaPct = (delta / start) * 100;
-    const ytdStart = hist.find(h => h.date.getFullYear() === 2026)?.value || hist[Math.floor(hist.length / 2)].value;
+    const thisYear = new Date().getFullYear();
+    const ytdStart = hist.find(h => h.date.getFullYear() === thisYear)?.value || hist[Math.floor(hist.length / 2)].value;
     const ytdPct = ((now - ytdStart) / ytdStart) * 100;
+
+    // Month-over-month / year-over-year growth chips. Only claim a number
+    // when the matching history point actually exists — no synthesized
+    // comparisons (matches the "no fabricated values" convention used
+    // elsewhere, e.g. the donut's zero-state).
+    const mom = hist.length >= 2 ? {
+      delta: now - hist[hist.length - 2].value,
+      pct: ((now - hist[hist.length - 2].value) / hist[hist.length - 2].value) * 100,
+    } : null;
+    const yoyPoint = findByMonthsAgo(hist, 12);
+    const yoy = yoyPoint ? {
+      delta: now - yoyPoint.value,
+      pct: ((now - yoyPoint.value) / yoyPoint.value) * 100,
+    } : null;
 
     // top movers
     const movers = [...D.positions].sort((a, b) => b.plPct - a.plPct);
@@ -35,11 +50,32 @@
               <span class="delta up">${Icon("trending_up", 12)} ${fmt$(delta, { signed: true, compact: true })} all-time</span>
               <span class="hero-since">YTD <span style="color:var(--green); font-weight:600">+${ytdPct.toFixed(1)}%</span></span>
             </div>
-            <div class="range-pills" id="ow-range">
-              ${["1M","3M","6M","YTD","1Y","2Y","ALL"].map((r,i) => `<button class="${i===6?'active':''}" data-r="${r}">${r}</button>`).join("")}
+            <div class="flex gap-s">
+              <div class="range-pills" id="ow-granularity">
+                <button class="active" data-g="monthly">Monthly</button>
+                <button data-g="yearly">Yearly</button>
+              </div>
+              <div class="range-pills" id="ow-range">
+                ${["1M","3M","6M","YTD","1Y","2Y","ALL"].map((r,i) => `<button class="${i===6?'active':''}" data-r="${r}">${r}</button>`).join("")}
+              </div>
+            </div>
+          </div>
+          <div class="hero-growth">
+            <div class="growth-chip">
+              <span class="label">MoM</span>
+              ${mom
+                ? `<span class="delta ${mom.delta >= 0 ? "up" : "down"}">${fmt$(mom.delta, { signed: true, compact: true })} · ${mom.pct >= 0 ? "+" : ""}${mom.pct.toFixed(1)}%</span>`
+                : `<span class="muted" style="font-size:12px;">Not enough history yet</span>`}
+            </div>
+            <div class="growth-chip">
+              <span class="label">YoY</span>
+              ${yoy
+                ? `<span class="delta ${yoy.delta >= 0 ? "up" : "down"}">${fmt$(yoy.delta, { signed: true, compact: true })} · ${yoy.pct >= 0 ? "+" : ""}${yoy.pct.toFixed(1)}%</span>`
+                : `<span class="muted" style="font-size:12px;">Not enough history yet</span>`}
             </div>
           </div>
           <div class="chart-wrap" id="ow-chart"></div>
+          <div class="muted chart-note" id="ow-chart-note" style="display:none;"></div>
         </div>
 
         <!-- RIGHT: Allocation donut -->
@@ -165,9 +201,11 @@
       });
     });
 
-    // chart (default ALL)
+    // chart (default Monthly / ALL)
     let currentRange = "ALL";
-    const drawChart = () => {
+    let currentGranularity = "monthly";
+    const noteEl = document.getElementById("ow-chart-note");
+    const drawMonthly = () => {
       const slice = sliceByRange(hist, currentRange);
       const series = slice.map(h => ({ x: h.date, y: h.value }));
       renderAreaChart(document.getElementById("ow-chart"), series, {
@@ -176,7 +214,25 @@
         fmtTip: (v) => fmt$(v, { dec: 0, compact: false }),
         color: "var(--accent)",
       });
+      if (noteEl) noteEl.style.display = "none";
     };
+    const drawYearly = () => {
+      const bars = yearlyBuckets(hist);
+      renderBarChart(document.getElementById("ow-chart"), bars, {
+        fmtY: (v) => "$" + (v / 1000).toFixed(0) + "K",
+        fmtBar: (v) => fmt$(v, { compact: true }),
+        color: "var(--accent)",
+      });
+      if (noteEl) {
+        if (bars.length < 2) {
+          noteEl.textContent = "More years will appear here as you send monthly updates.";
+          noteEl.style.display = "block";
+        } else {
+          noteEl.style.display = "none";
+        }
+      }
+    };
+    const drawChart = () => (currentGranularity === "yearly" ? drawYearly() : drawMonthly());
     drawChart();
     window.AppleSections._redraw = drawChart;
     const rangeEl = document.getElementById("ow-range");
@@ -190,6 +246,19 @@
       currentRange = btn.dataset.r;
       drawChart();
     });
+    }
+    const granEl = document.getElementById("ow-granularity");
+    if (granEl && !granEl.dataset.bound) {
+      granEl.dataset.bound = "1";
+      granEl.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-g]");
+        if (!btn) return;
+        document.querySelectorAll("#ow-granularity button").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentGranularity = btn.dataset.g;
+        if (rangeEl) rangeEl.style.display = currentGranularity === "yearly" ? "none" : "inline-flex";
+        drawChart();
+      });
     }
 
     // Donut
@@ -434,8 +503,24 @@
   function sliceByRange(hist, range) {
     if (range === "ALL") return hist;
     const months = ({ "1M": 1, "3M": 3, "6M": 6, "YTD": null, "1Y": 12, "2Y": 24 })[range];
-    if (range === "YTD") return hist.filter(h => h.date.getFullYear() === 2026);
+    if (range === "YTD") return hist.filter(h => h.date.getFullYear() === new Date().getFullYear());
     return hist.slice(-Math.min(months, hist.length));
+  }
+
+  // Month-index helper for growth-chip lookups (avoids day-of-month drift).
+  function _monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
+  function findByMonthsAgo(hist, n) {
+    if (hist.length < 2) return null;
+    const latestKey = _monthKey(hist[hist.length - 1].date);
+    return hist.find(h => _monthKey(h.date) === latestKey - n) || null;
+  }
+
+  // One bucket per calendar year present in history — last recorded value
+  // for that year (year-end, or latest available if the year isn't over).
+  function yearlyBuckets(hist) {
+    const byYear = {};
+    hist.forEach(h => { byYear[h.date.getFullYear()] = h; }); // ascending order → last write wins = latest in year
+    return Object.keys(byYear).sort().map(y => ({ label: y, value: byYear[y].value }));
   }
 
   // ============================================================

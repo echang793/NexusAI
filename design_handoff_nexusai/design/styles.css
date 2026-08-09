@@ -301,6 +301,20 @@ input { font: inherit; color: inherit; }
 .delta.flat { color: var(--text-2); background: var(--surface-2); }
 .hero-since { color: var(--text-2); }
 
+.hero-growth {
+  display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;
+}
+.growth-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 9px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.growth-chip .label {
+  font-size: 10px; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.chart-note { font-size: 11px; margin-top: 8px; text-align: center; }
+
 .range-pills {
   display: inline-flex; gap: 2px;
   background: var(--surface-2);

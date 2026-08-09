@@ -172,6 +172,56 @@
     return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
   };
 
+  // Bar chart — one bar per {label, value}. Used for yearly net-worth rollups.
+  window.renderBarChart = (container, bars, opts = {}) => {
+    const W = container.clientWidth || 720;
+    const H = container.clientHeight || 220;
+    const pad = { t: 28, r: 14, b: 22, l: 50 };
+    const innerW = W - pad.l - pad.r;
+    const innerH = H - pad.t - pad.b;
+
+    if (!bars.length) { container.innerHTML = '<div class="chart-empty">Loading…</div>'; return; }
+
+    const vals = bars.map(b => b.value);
+    const yMax = Math.max(...vals) * 1.15;
+    const yMin = Math.min(0, Math.min(...vals) * 1.05);
+    const sy = (y) => pad.t + (1 - (y - yMin) / (yMax - yMin)) * innerH;
+    const zeroY = sy(0);
+
+    const gap = 0.32; // fraction of slot width left as gap between bars
+    const slot = innerW / bars.length;
+    const barW = slot * (1 - gap);
+    const color = opts.color || "var(--accent)";
+
+    // y gridlines
+    const yTicks = 4;
+    let ticks = "";
+    for (let i = 0; i <= yTicks; i++) {
+      const t = yMin + (yMax - yMin) * (i / yTicks);
+      const y = sy(t);
+      ticks += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3,3"/>`;
+      ticks += `<text x="${pad.l - 8}" y="${y + 4}" text-anchor="end" fill="var(--text-3)" font-size="10">${opts.fmtY ? opts.fmtY(t) : Math.round(t)}</text>`;
+    }
+
+    let bodySvg = "";
+    bars.forEach((b, i) => {
+      const x = pad.l + i * slot + (slot - barW) / 2;
+      const y = sy(b.value);
+      const h = Math.max(2, Math.abs(zeroY - y));
+      const top = Math.min(zeroY, y);
+      bodySvg += `<rect x="${px(x)}" y="${px(top)}" width="${px(barW)}" height="${px(h)}" rx="6" fill="${color}"/>`;
+      bodySvg += `<text x="${px(x + barW / 2)}" y="${px(top - 8)}" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700">${opts.fmtBar ? opts.fmtBar(b.value) : Math.round(b.value)}</text>`;
+      bodySvg += `<text x="${px(x + barW / 2)}" y="${H - 4}" text-anchor="middle" fill="var(--text-3)" font-size="11">${b.label}</text>`;
+    });
+
+    container.innerHTML = `
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+        ${ticks}
+        ${bodySvg}
+      </svg>
+    `;
+  };
+
   // Donut chart
   window.renderDonut = (container, segments, opts = {}) => {
     const size = opts.size || 220;
