@@ -14,6 +14,11 @@ DEFAULTS = {
     "income_stability": "stable",
     "emergency_fund": True,
     "notes": "",
+    # CoastFIRE tracking — annual_spend of 0 means "not set up yet",
+    # keeps the feature invisible on the dashboard until the user opts in.
+    "coastfire_retire_age": 65,
+    "coastfire_annual_spend": 0,
+    "coastfire_return_pct": 7.0,
 }
 
 VALID_RISK = {"conservative", "moderate", "aggressive"}
@@ -78,6 +83,24 @@ def _coerce(p):
     notes = str(p.get("notes", "")).strip()
     name = str(p.get("name", DEFAULTS["name"])).strip()
 
+    try:
+        cf_retire_age = int(p.get("coastfire_retire_age", DEFAULTS["coastfire_retire_age"]))
+    except (TypeError, ValueError):
+        cf_retire_age = DEFAULTS["coastfire_retire_age"]
+    cf_retire_age = max(18, min(100, cf_retire_age))
+
+    try:
+        cf_annual_spend = float(p.get("coastfire_annual_spend", DEFAULTS["coastfire_annual_spend"]))
+    except (TypeError, ValueError):
+        cf_annual_spend = DEFAULTS["coastfire_annual_spend"]
+    cf_annual_spend = max(0.0, cf_annual_spend)
+
+    try:
+        cf_return_pct = float(p.get("coastfire_return_pct", DEFAULTS["coastfire_return_pct"]))
+    except (TypeError, ValueError):
+        cf_return_pct = DEFAULTS["coastfire_return_pct"]
+    cf_return_pct = max(0.0, min(20.0, cf_return_pct))
+
     return {
         "name": name,
         "risk_tolerance": risk,
@@ -87,6 +110,9 @@ def _coerce(p):
         "income_stability": stability,
         "emergency_fund": emergency,
         "notes": notes,
+        "coastfire_retire_age": cf_retire_age,
+        "coastfire_annual_spend": cf_annual_spend,
+        "coastfire_return_pct": cf_return_pct,
     }
 
 

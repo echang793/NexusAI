@@ -125,6 +125,9 @@
         </div>
       </div>
 
+      <!-- CoastFIRE -->
+      <div class="card mt-m" id="cf-card-wrap">${coastFireCard(D.coastFire)}</div>
+
       <!-- Sector breakdown -->
       <div class="card mt-m">
         <div class="card-head"><h3>Sector breakdown</h3>
@@ -141,6 +144,86 @@
         </div>
       </div>
     `;
+  }
+
+  // CoastFIRE — checked yearly as age/invested balance update. `cf` is the
+  // server-computed status block (see coastfire.py); recomputeCoastFire()
+  // below mirrors the same formula client-side so Settings edits reflect
+  // instantly without a full page reload.
+  function coastFireCard(cfData) {
+    const cfd = cfData || {};
+    if (!cfd.enabled) {
+      return `
+        <div class="card-head"><h3>CoastFIRE</h3><div class="meta">Checked yearly</div></div>
+        <div class="card-body">
+          <div class="muted" style="font-size:13px; line-height:1.5;">
+            Set your target retirement age and expected annual retirement spending in
+            Settings to start tracking CoastFIRE — whether your current invested balance
+            alone (no more contributions) will compound to your FIRE number by retirement.
+          </div>
+        </div>
+      `;
+    }
+    const pctClamped = Math.max(0, Math.min(100, cfd.pctOfCoast));
+    const statusColor = cfd.onTrack ? "var(--green)" : "var(--accent)";
+    return `
+      <div class="card-head"><h3>CoastFIRE</h3><div class="meta">Age ${cfd.age} → ${cfd.retireAge} · ${cfd.yearsToRetire}yr left</div></div>
+      <div class="card-body">
+        <div class="flex-between mb-m">
+          <div>
+            <div class="muted" style="font-size:12px;">Invested (excl. cash)</div>
+            <div style="font-size:20px; font-weight:700;">${fmt$(cfd.invested, { compact: true })}</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="muted" style="font-size:12px;">Coast number needed today</div>
+            <div style="font-size:20px; font-weight:700;">${fmt$(cfd.coastNumberNeeded, { compact: true })}</div>
+          </div>
+        </div>
+        <div class="bar-track" style="height:10px;">
+          <div class="bar-fill" style="width:${pctClamped}%; background:${statusColor};"></div>
+        </div>
+        <div class="mt-s" style="font-size:12px; color:var(--text-2);">
+          ${cfd.pctOfCoast.toFixed(0)}% of coast number
+          ${cfd.onTrack
+            ? ` — you've coasted! Current balance alone should reach your FIRE number by ${cfd.retireAge}. 🎉`
+            : ` — ${fmt$(Math.abs(cfd.surplus), { compact: true })} more needed to coast without future contributions.`}
+        </div>
+        <div class="mt-m" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="stat-tile"><div class="label">FIRE number (25x)</div><div class="v">${fmt$(cfd.fireNumber, { compact: true })}</div></div>
+          <div class="stat-tile"><div class="label">Projected at ${cfd.retireAge}</div><div class="v">${fmt$(cfd.projectedAtRetirement, { compact: true })}</div></div>
+        </div>
+        <div class="muted mt-s" style="font-size:11px;">
+          Assumes ${cfd.returnPct}% real annual return, ${fmt$(cfd.annualSpend, { compact: true })}/yr retirement spend, no further contributions.
+        </div>
+      </div>
+    `;
+  }
+
+  // Mirrors coastfire.py's compute() so Settings saves update the card
+  // instantly — invested balance is unchanged by a profile edit, only the
+  // age/retire-age/spend/return inputs are, so we don't need a reload.
+  function recomputeCoastFire(inputs) {
+    const D2 = window.NEXUS_DATA;
+    const invested = D2.coastFire ? D2.coastFire.invested : 0;
+    const years = Math.max(0, inputs.retireAge - inputs.age);
+    const rate = inputs.returnPct / 100;
+    const fireNumber = inputs.annualSpend * 25;
+    const needed = fireNumber > 0 ? fireNumber / Math.pow(1 + rate, years) : 0;
+    const projected = invested * Math.pow(1 + rate, years);
+    const onTrack = fireNumber > 0 && invested >= needed;
+    const pctOfCoast = needed > 0 ? (invested / needed) * 100 : 0;
+    D2.coastFire = {
+      enabled: inputs.annualSpend > 0,
+      age: inputs.age, retireAge: inputs.retireAge, yearsToRetire: years,
+      annualSpend: Math.round(inputs.annualSpend), returnPct: inputs.returnPct,
+      fireNumber: Math.round(fireNumber), coastNumberNeeded: Math.round(needed),
+      invested: Math.round(invested), surplus: Math.round(invested - needed),
+      pctOfCoast: +pctOfCoast.toFixed(1), onTrack,
+      projectedAtRetirement: Math.round(projected),
+      projectedSurplus: Math.round(projected - fireNumber),
+    };
+    const wrap = document.getElementById("cf-card-wrap");
+    if (wrap) wrap.innerHTML = coastFireCard(D2.coastFire);
   }
 
   function moverRow(p) {
@@ -864,5 +947,5 @@
   }
 
   // expose
-  window.AppleSections = { renderOverview, hydrateOverview, renderAnalyze, hydrateAnalyze, moverRow, sectorColor };
+  window.AppleSections = { renderOverview, hydrateOverview, renderAnalyze, hydrateAnalyze, moverRow, sectorColor, recomputeCoastFire };
 })();

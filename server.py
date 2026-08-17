@@ -13,6 +13,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 sys.path.insert(0, os.path.dirname(__file__))
 
 import accounts as ac
+import coastfire as cf
 import nw_snapshots
 import portfolio as pf
 import profile as pr
@@ -587,6 +588,10 @@ def build_nexus_data(force: bool = False) -> dict:
     acct_list = _build_account_list(positions, extra_accounts)
     net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
     nw_history = _net_worth_history(net_worth, total_value, acct_list)
+    # CoastFIRE uses invested holdings only (total_value = 401k/HSA/Brokerage/
+    # Roth positions), not cash/checking — the balance actually left to
+    # compound untouched.
+    coastfire_status = cf.compute(raw_profile, total_value)
 
     sector_map: dict[str, float] = {}
     for p in positions:
@@ -636,6 +641,7 @@ def build_nexus_data(force: bool = False) -> dict:
         "totalPLPct": round(total_pl_pct, 4),
         "netWorth": round(net_worth, 2),
         "netWorthHistory": nw_history,
+        "coastFire": coastfire_status,
         "watchlist": wl_out,
         "news": [],
         "featured": _placeholder_featured(featured_ticker, featured_price),
@@ -683,6 +689,7 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
             acct_list = _build_account_list(positions, extra_accounts)
             net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
             nw_history = _net_worth_history(net_worth, total_value, acct_list)
+            coastfire_status = cf.compute(raw_profile, total_value)
 
             # 3. Featured ticker — fundamentals + chart history (skip LLM for speed)
             featured_ticker_use = positions[0]["ticker"] if positions else featured_ticker
@@ -749,6 +756,7 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
                         "totalPLPct": round(total_pl_pct, 4),
                         "netWorth": round(net_worth, 2),
                         "netWorthHistory": nw_history,
+                        "coastFire": coastfire_status,
                         "featured": featured,
                         "featuredHistory": featured_history,
                         "sectorWeights": sector_weights,
@@ -1437,6 +1445,21 @@ def api_save_profile():
             pass
     if body.get("notes") is not None:
         existing["notes"] = str(body["notes"]).strip()
+    if body.get("coastfire_retire_age"):
+        try:
+            existing["coastfire_retire_age"] = int(body["coastfire_retire_age"])
+        except (TypeError, ValueError):
+            pass
+    if body.get("coastfire_annual_spend") is not None:
+        try:
+            existing["coastfire_annual_spend"] = float(body["coastfire_annual_spend"])
+        except (TypeError, ValueError):
+            pass
+    if body.get("coastfire_return_pct") is not None:
+        try:
+            existing["coastfire_return_pct"] = float(body["coastfire_return_pct"])
+        except (TypeError, ValueError):
+            pass
     pr.save_profile(existing)
     # Invalidate data cache so next /data.js reflects new name
     global _data_cache_ts
