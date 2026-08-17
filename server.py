@@ -588,10 +588,10 @@ def build_nexus_data(force: bool = False) -> dict:
     acct_list = _build_account_list(positions, extra_accounts)
     net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
     nw_history = _net_worth_history(net_worth, total_value, acct_list)
-    # CoastFIRE uses invested holdings only (total_value = 401k/HSA/Brokerage/
-    # Roth positions), not cash/checking — the balance actually left to
-    # compound untouched.
-    coastfire_status = cf.compute(raw_profile, total_value)
+    # CoastFIRE "invested" = holdings positions + manual accounts that are
+    # actually invested (e.g. RoboInvestor), not cash/checking — the balance
+    # actually left to compound untouched.
+    coastfire_status = cf.compute(raw_profile, _investable_total(total_value, extra_accounts))
 
     sector_map: dict[str, float] = {}
     for p in positions:
@@ -689,7 +689,7 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
             acct_list = _build_account_list(positions, extra_accounts)
             net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
             nw_history = _net_worth_history(net_worth, total_value, acct_list)
-            coastfire_status = cf.compute(raw_profile, total_value)
+            coastfire_status = cf.compute(raw_profile, _investable_total(total_value, extra_accounts))
 
             # 3. Featured ticker — fundamentals + chart history (skip LLM for speed)
             featured_ticker_use = positions[0]["ticker"] if positions else featured_ticker
@@ -892,6 +892,20 @@ def _synthetic_nw_history(current: float, months: int = 24) -> list:
     if out:
         out[-1]["value"] = round(current)
     return out
+
+
+# Manual accounts.json entries whose balance is actually invested capital
+# (not idle cash sitting in a brokerage sweep) — e.g. Webull's RoboInvestor
+# holds ETFs, not cash, even though it's tracked as a manual balance rather
+# than ticker positions. Used for CoastFIRE's "invested" total below.
+_INVESTED_MANUAL_TYPES = {"Taxable", "Retirement", "Crypto"}
+
+
+def _investable_total(total_value: float, extra_accounts: list) -> float:
+    manual_invested = sum(
+        a["balance"] for a in extra_accounts if a.get("type") in _INVESTED_MANUAL_TYPES
+    )
+    return total_value + manual_invested
 
 
 def _net_worth_history(net_worth: float, total_value: float, acct_list: list) -> list:
