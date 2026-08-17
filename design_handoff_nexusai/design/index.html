@@ -28,6 +28,7 @@
       <button class="nav-item" data-section="analyze"><span class="nav-icon" id="ni-analyze"></span>Analyze</button>
       <button class="nav-item" data-section="portfolio"><span class="nav-icon" id="ni-portfolio"></span>Portfolio<span class="nav-badge" id="badge-portfolio">44</span></button>
       <button class="nav-item" data-section="watchlist"><span class="nav-icon" id="ni-watchlist"></span>Watchlist<span class="nav-badge" id="badge-watchlist">6</span></button>
+      <button class="nav-item" data-section="planning"><span class="nav-icon" id="ni-planning"></span>Planning</button>
       <div class="nav-section">AI</div>
       <button class="nav-item" data-section="advisor"><span class="nav-icon" id="ni-advisor"></span>Advisor<span class="nav-badge" style="background:linear-gradient(135deg, #0a84ff, #b14aff); color:white;">new</span></button>
     </nav>
@@ -67,6 +68,7 @@
       <div id="section-analyze" class="section"></div>
       <div id="section-portfolio" class="section"></div>
       <div id="section-watchlist" class="section"></div>
+      <div id="section-planning" class="section"></div>
       <div id="section-advisor" class="section"></div>
     </div>
   </main>
@@ -169,6 +171,58 @@
                background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
     </div>
 
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Monthly contribution ($, full FIRE)</label>
+      <input id="s-cf-contrib" type="number" min="0" step="50" placeholder="0"
+        style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+               background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+    </div>
+
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--text-2);margin:16px 0 12px;">Planning</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+      <div>
+        <label style="display:block;font-size:11px;color:var(--text-2);margin-bottom:4px;">401(k) YTD ($)</label>
+        <input id="s-pl-401k" type="number" min="0" step="100" placeholder="0"
+          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:12px;box-sizing:border-box;"/>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:var(--text-2);margin-bottom:4px;">HSA YTD ($)</label>
+        <input id="s-pl-hsa" type="number" min="0" step="100" placeholder="0"
+          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:12px;box-sizing:border-box;"/>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:var(--text-2);margin-bottom:4px;">Roth YTD ($)</label>
+        <input id="s-pl-roth" type="number" min="0" step="100" placeholder="0"
+          style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:12px;box-sizing:border-box;"/>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Target stock %</label>
+        <input id="s-pl-target-stock" type="number" min="0" max="100" step="1" placeholder="90"
+          style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Tax-loss threshold (%)</label>
+        <input id="s-pl-tlh" type="number" min="-100" max="0" step="1" placeholder="-10"
+          style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+                 background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Monthly expense ($, emergency fund)</label>
+      <input id="s-pl-monthly-expense" type="number" min="0" step="100" placeholder="0 = use annual spend ÷ 12"
+        style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+               background:var(--surface-2);color:var(--text);font-size:13px;box-sizing:border-box;"/>
+    </div>
+
     <div style="margin-bottom:16px;">
       <label style="display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;">Notes</label>
       <textarea id="s-notes" rows="2" placeholder="Goals, notes…"
@@ -190,6 +244,7 @@
 <script src="charts.js"></script>
 <script src="sections-1.js"></script>
 <script src="sections-2.js"></script>
+<script src="sections-3.js"></script>
 <script src="command.js"></script>
 <script src="animations.js"></script>
 <script src="sleek.js"></script>
@@ -200,7 +255,7 @@
   // Set nav icons
   const icons = {
     "ni-overview": "home", "ni-analyze": "chart", "ni-portfolio": "wallet",
-    "ni-watchlist": "eye", "ni-advisor": "sparkles",
+    "ni-watchlist": "eye", "ni-planning": "target", "ni-advisor": "sparkles",
     "search-icon": "search", "bell-btn": "bell", "settings-btn": "settings",
     "tt-light": "sun", "tt-dark": "moon",
   };
@@ -226,12 +281,13 @@
   // Render each section's HTML
   const titles = {
     overview: "Overview", analyze: "Analyze", portfolio: "Portfolio",
-    watchlist: "Watchlist", advisor: "Advisor",
+    watchlist: "Watchlist", planning: "Planning", advisor: "Advisor",
   };
   document.getElementById("section-overview").innerHTML = AppleSections.renderOverview();
   document.getElementById("section-analyze").innerHTML = AppleSections.renderAnalyze();
   document.getElementById("section-portfolio").innerHTML = AppleSections.renderPortfolio();
   document.getElementById("section-watchlist").innerHTML = AppleSections.renderWatchlist();
+  document.getElementById("section-planning").innerHTML = AppleSections.renderPlanning();
   document.getElementById("section-advisor").innerHTML = AppleSections.renderAdvisor();
 
   // Update portfolio badge
@@ -280,6 +336,42 @@
     }, 140);
   }
 
+  // Merge a /api/snapshot response into NEXUS_DATA and re-render the
+  // sections that depend on it. Shared by the cold-cache poll below and by
+  // the Settings-save handler (planning fields have no cheap client-side
+  // formula mirror like CoastFIRE does, so a refetch is simplest).
+  function applySnapshotData(s) {
+    const D = window.NEXUS_DATA;
+    D.positions = s.positions;
+    D.portfolioValue = s.portfolioValue;
+    D.totalCost = s.totalCost;
+    D.totalPL = s.totalPL;
+    D.totalPLPct = s.totalPLPct;
+    D.netWorth = s.netWorth;
+    D.accounts = s.accounts;
+    D.watchlist = s.watchlist;
+    D.sectorWeights = s.sectorWeights;
+    if (s.advisorPlan) D.advisorPlan = s.advisorPlan;
+    if (s.riskMetrics) D.riskMetrics = s.riskMetrics;
+    if (s.coastFire) D.coastFire = s.coastFire;
+    if (s.fire) D.fire = s.fire;
+    if (s.contributions) D.contributions = s.contributions;
+    if (s.rebalance) D.rebalance = s.rebalance;
+    if (s.taxLossHarvest) D.taxLossHarvest = s.taxLossHarvest;
+    if (s.dividends) D.dividends = s.dividends;
+    if (s.emergencyFund) D.emergencyFund = s.emergencyFund;
+    if (s.netWorthPercentile) D.netWorthPercentile = s.netWorthPercentile;
+    if (s.insights) D.insights = s.insights;
+    ["overview","portfolio","watchlist","planning","advisor"].forEach(sec => {
+      const fn = AppleSections["render" + sec.charAt(0).toUpperCase() + sec.slice(1)];
+      const el = document.getElementById("section-" + sec);
+      if (fn && el) el.innerHTML = fn();
+    });
+    const hy = AppleSections["hydrate" + active.charAt(0).toUpperCase() + active.slice(1)];
+    if (hy) try { hy(); } catch(e){}
+    if (window.checkWatchlistAlerts) checkWatchlistAlerts();
+  }
+
   window.Nexus = { navigateTo, flashTicker, getActive: () => active };
 
   if (window.CommandPalette) CommandPalette.init();
@@ -299,28 +391,7 @@
         .then(s => {
           if (!s.ok) return;
           const stillZero = s.positions.length > 0 && s.positions.every(p => !p.plPct);
-          // Merge enriched fields
-          D.positions = s.positions;
-          D.portfolioValue = s.portfolioValue;
-          D.totalCost = s.totalCost;
-          D.totalPL = s.totalPL;
-          D.totalPLPct = s.totalPLPct;
-          D.netWorth = s.netWorth;
-          D.accounts = s.accounts;
-          D.watchlist = s.watchlist;
-          D.sectorWeights = s.sectorWeights;
-          if (s.advisorPlan) D.advisorPlan = s.advisorPlan;
-          if (s.riskMetrics) D.riskMetrics = s.riskMetrics;
-          // Re-render the sections whose HTML depends on these numbers
-          ["overview","portfolio","watchlist","advisor"].forEach(sec => {
-            const fn = AppleSections["render" + sec.charAt(0).toUpperCase() + sec.slice(1)];
-            const el = document.getElementById("section-" + sec);
-            if (fn && el) el.innerHTML = fn();
-          });
-          // Re-hydrate the active one
-          const hy = AppleSections["hydrate" + active.charAt(0).toUpperCase() + active.slice(1)];
-          if (hy) try { hy(); } catch(e){}
-          if (window.checkWatchlistAlerts) checkWatchlistAlerts();
+          applySnapshotData(s);
           // If server still cold, poll again (max 4 tries)
           if (stillZero && tries < 4) setTimeout(poll, 2000);
         })
@@ -393,6 +464,12 @@
       } else if (w.sellAbove && w.price > 0 && w.price >= w.sellAbove) {
         items.push({ type: "sell", ticker: w.ticker, msg: `Price ${fmt$(w.price)} hit sell target ≥ ${fmt$(w.sellAbove)}`, color: "var(--red)" });
       }
+    });
+    // Cross-feature alerts computed server-side (stale balances, contribution
+    // room, rebalance drift, tax-loss candidates, CoastFIRE reached).
+    const severityColor = { warn: "#ff9f0a", info: "var(--accent)", good: "var(--green)" };
+    (D.insights || []).forEach(i => {
+      items.push({ type: i.type, ticker: i.title, msg: i.msg, color: severityColor[i.severity] || "var(--text-3)" });
     });
     if (items.length === 0) {
       list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:13px;">No alerts triggered</div>`;
@@ -496,12 +573,27 @@
       document.getElementById("s-horizon").value = p.horizon || "";
       document.getElementById("s-risk").value = (p.risk || "moderate").toLowerCase();
       document.getElementById("s-notes").value = p.notes || "";
+      document.getElementById("s-pl-tlh").value = p.tlhThresholdPct != null ? p.tlhThresholdPct : "";
     }
     if (D && D.coastFire) {
       const cfd = D.coastFire;
       document.getElementById("s-cf-retire-age").value = cfd.retireAge || "";
       document.getElementById("s-cf-return").value = cfd.returnPct || "";
       document.getElementById("s-cf-spend").value = cfd.annualSpend || "";
+    }
+    if (D && D.fire) {
+      document.getElementById("s-cf-contrib").value = D.fire.monthlyContribution || "";
+    }
+    if (D && D.contributions) {
+      document.getElementById("s-pl-401k").value = D.contributions["401k"]?.ytd || "";
+      document.getElementById("s-pl-hsa").value = D.contributions.hsa?.ytd || "";
+      document.getElementById("s-pl-roth").value = D.contributions.roth?.ytd || "";
+    }
+    if (D && D.rebalance) {
+      document.getElementById("s-pl-target-stock").value = D.rebalance.targetStockPct || "";
+    }
+    if (D && D.emergencyFund) {
+      document.getElementById("s-pl-monthly-expense").value = D.emergencyFund.monthlyExpense || "";
     }
   }
 
@@ -522,6 +614,13 @@
       coastfire_retire_age: parseInt(document.getElementById("s-cf-retire-age").value) || 65,
       coastfire_annual_spend: parseFloat(document.getElementById("s-cf-spend").value) || 0,
       coastfire_return_pct: parseFloat(document.getElementById("s-cf-return").value) || 7,
+      coastfire_monthly_contribution: parseFloat(document.getElementById("s-cf-contrib").value) || 0,
+      contrib_401k_ytd: parseFloat(document.getElementById("s-pl-401k").value) || 0,
+      contrib_hsa_ytd: parseFloat(document.getElementById("s-pl-hsa").value) || 0,
+      contrib_roth_ytd: parseFloat(document.getElementById("s-pl-roth").value) || 0,
+      target_stock_pct: parseFloat(document.getElementById("s-pl-target-stock").value) || 90,
+      tlh_threshold_pct: parseFloat(document.getElementById("s-pl-tlh").value) || -10,
+      monthly_expense: parseFloat(document.getElementById("s-pl-monthly-expense").value) || 0,
     };
     fetch("/api/profile", {
       method: "POST",
@@ -549,6 +648,10 @@
             returnPct: payload.coastfire_return_pct,
           });
         }
+        // Contributions/rebalance/tax-loss/emergency-fund/full-FIRE don't
+        // have a cheap client-side formula mirror — refetch to pick up the
+        // new inputs rather than showing stale numbers until next reload.
+        fetch("/api/snapshot").then(r => r.json()).then(s => { if (s.ok) applySnapshotData(s); }).catch(() => {});
         const status = document.getElementById("s-status");
         status.style.display = "block";
         setTimeout(() => { status.style.display = "none"; }, 2500);

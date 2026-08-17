@@ -1,4 +1,4 @@
-"""Investor profile persistence: risk tolerance, horizon, goals, etc."""
+"""Investor profile persistence: risk tolerance, horizon, goals, planning inputs."""
 
 import json
 import os
@@ -14,16 +14,43 @@ DEFAULTS = {
     "income_stability": "stable",
     "emergency_fund": True,
     "notes": "",
-    # CoastFIRE tracking — annual_spend of 0 means "not set up yet",
-    # keeps the feature invisible on the dashboard until the user opts in.
+    # CoastFIRE / full-FIRE tracking — annual_spend of 0 means "not set up
+    # yet", keeps those cards invisible until the user opts in via Settings.
     "coastfire_retire_age": 65,
     "coastfire_annual_spend": 0,
     "coastfire_return_pct": 7.0,
+    "coastfire_monthly_contribution": 0,
+    # Contribution-limit tracker — YTD $ actually contributed this year,
+    # entered manually (no transaction feed exists to derive this).
+    "contrib_401k_ytd": 0,
+    "contrib_hsa_ytd": 0,
+    "contrib_roth_ytd": 0,
+    # Rebalance drift target (% of invested assets in "stock" vs safe/cash).
+    "target_stock_pct": 90.0,
+    # Tax-loss harvesting scan threshold, as a negative % (e.g. -10 = flag
+    # anything down 10% or more).
+    "tlh_threshold_pct": -10.0,
+    # Emergency-fund coverage — monthly expense; 0 falls back to
+    # coastfire_annual_spend / 12 at compute time.
+    "monthly_expense": 0,
 }
 
 VALID_RISK = {"conservative", "moderate", "aggressive"}
 VALID_GOALS = {"retirement", "wealth_building", "income", "preservation"}
 VALID_STABILITY = {"stable", "variable", "uncertain"}
+
+# (field, min, max) for simple clamped-float fields handled generically.
+_FLOAT_FIELDS = [
+    ("coastfire_annual_spend", 0.0, None),
+    ("coastfire_return_pct", 0.0, 20.0),
+    ("coastfire_monthly_contribution", 0.0, None),
+    ("contrib_401k_ytd", 0.0, None),
+    ("contrib_hsa_ytd", 0.0, None),
+    ("contrib_roth_ytd", 0.0, None),
+    ("target_stock_pct", 0.0, 100.0),
+    ("tlh_threshold_pct", -100.0, 0.0),
+    ("monthly_expense", 0.0, None),
+]
 
 
 def load_profile(path=None):
@@ -46,6 +73,18 @@ def save_profile(profile, path=None):
     with open(path, "w") as f:
         json.dump(clean, f, indent=2)
     return clean
+
+
+def _clamped_float(p, field, lo, hi):
+    try:
+        v = float(p.get(field, DEFAULTS[field]))
+    except (TypeError, ValueError):
+        v = DEFAULTS[field]
+    if lo is not None:
+        v = max(lo, v)
+    if hi is not None:
+        v = min(hi, v)
+    return v
 
 
 def _coerce(p):
@@ -89,19 +128,7 @@ def _coerce(p):
         cf_retire_age = DEFAULTS["coastfire_retire_age"]
     cf_retire_age = max(18, min(100, cf_retire_age))
 
-    try:
-        cf_annual_spend = float(p.get("coastfire_annual_spend", DEFAULTS["coastfire_annual_spend"]))
-    except (TypeError, ValueError):
-        cf_annual_spend = DEFAULTS["coastfire_annual_spend"]
-    cf_annual_spend = max(0.0, cf_annual_spend)
-
-    try:
-        cf_return_pct = float(p.get("coastfire_return_pct", DEFAULTS["coastfire_return_pct"]))
-    except (TypeError, ValueError):
-        cf_return_pct = DEFAULTS["coastfire_return_pct"]
-    cf_return_pct = max(0.0, min(20.0, cf_return_pct))
-
-    return {
+    out = {
         "name": name,
         "risk_tolerance": risk,
         "horizon_years": horizon,
@@ -111,9 +138,10 @@ def _coerce(p):
         "emergency_fund": emergency,
         "notes": notes,
         "coastfire_retire_age": cf_retire_age,
-        "coastfire_annual_spend": cf_annual_spend,
-        "coastfire_return_pct": cf_return_pct,
     }
+    for field, lo, hi in _FLOAT_FIELDS:
+        out[field] = _clamped_float(p, field, lo, hi)
+    return out
 
 
 def profile_summary(profile):

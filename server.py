@@ -14,9 +14,16 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import accounts as ac
 import coastfire as cf
+import contributions as ct
+import dividends as dv
+import fire as fr
+import insights as ins
 import nw_snapshots
+import planning as plan
 import portfolio as pf
 import profile as pr
+import rebalance as rb
+import taxloss as tlh
 import watchlist as wl
 import config
 from analyst import analyze_ticker, chat_with_advisor, stream_chat_reply  # noqa: F401
@@ -66,6 +73,27 @@ def _prefetch_sectors(tickers: list[str]) -> None:
         for t in tickers:
             _get_sector(t)
     threading.Thread(target=_run, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Dividend rate cache ($/share/year, fetched lazily) — feeds dividends.py
+# ---------------------------------------------------------------------------
+_div_cache: dict[str, float] = {}
+_div_lock = threading.Lock()
+
+
+def _prefetch_dividends(tickers: list[str]) -> None:
+    for t in tickers:
+        with _div_lock:
+            if t in _div_cache:
+                continue
+        try:
+            info = get_dividend_info(t)
+            rate = info.get("annual_div") or 0.0
+        except Exception:
+            rate = 0.0
+        with _div_lock:
+            _div_cache[t] = rate
 
 
 # ---------------------------------------------------------------------------
@@ -588,10 +616,11 @@ def build_nexus_data(force: bool = False) -> dict:
     acct_list = _build_account_list(positions, extra_accounts)
     net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
     nw_history = _net_worth_history(net_worth, total_value, acct_list)
-    # CoastFIRE "invested" = holdings positions + manual accounts that are
-    # actually invested (e.g. RoboInvestor), not cash/checking — the balance
-    # actually left to compound untouched.
-    coastfire_status = cf.compute(raw_profile, _investable_total(total_value, extra_accounts))
+    # "Invested" = holdings positions + manual accounts that are actually
+    # invested (e.g. RoboInvestor), not cash/checking — the balance actually
+    # left to compound untouched. Shared by CoastFIRE and full-FIRE.
+    invested_total = _investable_total(total_value, extra_accounts)
+    coastfire_status = cf.compute(raw_profile, invested_total)
 
     sector_map: dict[str, float] = {}
     for p in positions:
@@ -601,6 +630,33 @@ def build_nexus_data(force: bool = False) -> dict:
         {"sector": k, "weight": round(v, 2)}
         for k, v in sorted(sector_map.items(), key=lambda x: -x[1])
     ]
+
+    contributions_status = ct.compute(raw_profile)
+    rebalance_status = rb.compute(raw_profile, positions)
+    tax_loss_candidates = tlh.scan(positions, float(raw_profile.get("tlh_threshold_pct", -10) or -10))
+    dividends_status = dv.compute(positions, _div_cache)
+    cash_total = sum(a["balance"] for a in extra_accounts if a.get("type") in {"Cash", "HYSA"})
+    emergency_fund_status = plan.emergency_fund(raw_profile, cash_total)
+    nw_percentile = plan.net_worth_percentile(int(raw_profile.get("age", 30) or 30), net_worth)
+
+    fire_status = fr.compute(raw_profile, invested_total)
+    years_available = max(0, int(raw_profile.get("coastfire_retire_age", 65) or 65) - int(raw_profile.get("age", 30) or 30))
+    if fire_status.get("enabled"):
+        monte_carlo_status = fr.monte_carlo(
+            invested_total,
+            float(raw_profile.get("coastfire_monthly_contribution", 0) or 0) * 12.0,
+            years_available,
+            fire_status.get("fireNumber", 0),
+            mean_return=float(raw_profile.get("coastfire_return_pct", 7.0) or 7.0) / 100.0,
+        )
+    else:
+        monte_carlo_status = {"successPct": None, "trials": 0}
+    fire_status["monteCarlo"] = monte_carlo_status
+
+    insights_list = ins.build(
+        extra_accounts=extra_accounts, contributions=contributions_status,
+        rebalance=rebalance_status, tax_loss=tax_loss_candidates, coastfire=coastfire_status,
+    )
 
     raw_name = raw_profile.get("name", "")
     name = raw_name or "Alex Chen"
@@ -614,6 +670,7 @@ def build_nexus_data(force: bool = False) -> dict:
         "income_stability": raw_profile.get("income_stability", "stable").title(),
         "emergency_fund": raw_profile.get("emergency_fund", True),
         "notes": raw_profile.get("notes", ""),
+        "tlhThresholdPct": raw_profile.get("tlh_threshold_pct", -10.0),
     }
 
     wl_out = [
@@ -642,6 +699,14 @@ def build_nexus_data(force: bool = False) -> dict:
         "netWorth": round(net_worth, 2),
         "netWorthHistory": nw_history,
         "coastFire": coastfire_status,
+        "fire": fire_status,
+        "contributions": contributions_status,
+        "rebalance": rebalance_status,
+        "taxLossHarvest": tax_loss_candidates,
+        "dividends": dividends_status,
+        "emergencyFund": emergency_fund_status,
+        "netWorthPercentile": nw_percentile,
+        "insights": insights_list,
         "watchlist": wl_out,
         "news": [],
         "featured": _placeholder_featured(featured_ticker, featured_price),
@@ -689,7 +754,8 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
             acct_list = _build_account_list(positions, extra_accounts)
             net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
             nw_history = _net_worth_history(net_worth, total_value, acct_list)
-            coastfire_status = cf.compute(raw_profile, _investable_total(total_value, extra_accounts))
+            invested_total = _investable_total(total_value, extra_accounts)
+            coastfire_status = cf.compute(raw_profile, invested_total)
 
             # 3. Featured ticker — fundamentals + chart history (skip LLM for speed)
             featured_ticker_use = positions[0]["ticker"] if positions else featured_ticker
@@ -744,6 +810,35 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
                 for k, v in sorted(sector_map.items(), key=lambda x: -x[1])
             ]
 
+            # 5. Planning features — cheap, pure functions over what's above
+            _prefetch_dividends(tickers)  # blocking (already in a bg thread)
+            contributions_status = ct.compute(raw_profile)
+            rebalance_status = rb.compute(raw_profile, positions)
+            tax_loss_candidates = tlh.scan(positions, float(raw_profile.get("tlh_threshold_pct", -10) or -10))
+            dividends_status = dv.compute(positions, _div_cache)
+            cash_total = sum(a["balance"] for a in extra_accounts if a.get("type") in {"Cash", "HYSA"})
+            emergency_fund_status = plan.emergency_fund(raw_profile, cash_total)
+            nw_percentile = plan.net_worth_percentile(int(raw_profile.get("age", 30) or 30), net_worth)
+
+            fire_status = fr.compute(raw_profile, invested_total)
+            years_available = max(0, int(raw_profile.get("coastfire_retire_age", 65) or 65) - int(raw_profile.get("age", 30) or 30))
+            if fire_status.get("enabled"):
+                monte_carlo_status = fr.monte_carlo(
+                    invested_total,
+                    float(raw_profile.get("coastfire_monthly_contribution", 0) or 0) * 12.0,
+                    years_available,
+                    fire_status.get("fireNumber", 0),
+                    mean_return=float(raw_profile.get("coastfire_return_pct", 7.0) or 7.0) / 100.0,
+                )
+            else:
+                monte_carlo_status = {"successPct": None, "trials": 0}
+            fire_status["monteCarlo"] = monte_carlo_status
+
+            insights_list = ins.build(
+                extra_accounts=extra_accounts, contributions=contributions_status,
+                rebalance=rebalance_status, tax_loss=tax_loss_candidates, coastfire=coastfire_status,
+            )
+
             # Update cache in place
             with _bg_lock:
                 if _data_cache:
@@ -757,6 +852,14 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
                         "netWorth": round(net_worth, 2),
                         "netWorthHistory": nw_history,
                         "coastFire": coastfire_status,
+                        "fire": fire_status,
+                        "contributions": contributions_status,
+                        "rebalance": rebalance_status,
+                        "taxLossHarvest": tax_loss_candidates,
+                        "dividends": dividends_status,
+                        "emergencyFund": emergency_fund_status,
+                        "netWorthPercentile": nw_percentile,
+                        "insights": insights_list,
                         "featured": featured,
                         "featuredHistory": featured_history,
                         "sectorWeights": sector_weights,
@@ -1464,21 +1567,44 @@ def api_save_profile():
             existing["coastfire_retire_age"] = int(body["coastfire_retire_age"])
         except (TypeError, ValueError):
             pass
-    if body.get("coastfire_annual_spend") is not None:
-        try:
-            existing["coastfire_annual_spend"] = float(body["coastfire_annual_spend"])
-        except (TypeError, ValueError):
-            pass
-    if body.get("coastfire_return_pct") is not None:
-        try:
-            existing["coastfire_return_pct"] = float(body["coastfire_return_pct"])
-        except (TypeError, ValueError):
-            pass
+    # Every clamped-float planning field (CoastFIRE, contributions,
+    # rebalance target, tax-loss threshold, emergency fund) shares the same
+    # accept-if-present pattern — pr._FLOAT_FIELDS is the single source of
+    # truth for which fields those are.
+    for field, _lo, _hi in pr._FLOAT_FIELDS:
+        if body.get(field) is not None:
+            try:
+                existing[field] = float(body[field])
+            except (TypeError, ValueError):
+                pass
     pr.save_profile(existing)
     # Invalidate data cache so next /data.js reflects new name
     global _data_cache_ts
     _data_cache_ts = 0.0
     return jsonify({"ok": True})
+
+
+@app.route("/api/export/gains")
+def api_export_gains():
+    """Unrealized-gains CSV for tax season.
+
+    No purchase-date/transaction history is tracked, so this cannot split
+    short vs. long term — it's the current unrealized P/L per position,
+    a starting point to reconcile against your broker's 1099, not a
+    substitute for it.
+    """
+    data = build_nexus_data()
+    lines = ["ticker,account,shares,avg_cost,price,cost_basis,market_value,unrealized_pl,unrealized_pl_pct"]
+    for p in data["positions"]:
+        lines.append(
+            f'{p["ticker"]},{p.get("account","")},{p["shares"]},{p["avg_cost"]},'
+            f'{p["price"]},{round(p["cost"],2)},{round(p["value"],2)},{round(p["pl"],2)},{round(p["plPct"],2)}'
+        )
+    csv_text = "\n".join(lines) + "\n"
+    return Response(
+        csv_text, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=nexusai_unrealized_gains.csv"},
+    )
 
 
 @app.route("/api/snapshot")
@@ -1501,6 +1627,15 @@ def api_snapshot():
         "sectorWeights": data["sectorWeights"],
         "advisorPlan": data["advisorPlan"],
         "riskMetrics": data["riskMetrics"],
+        "coastFire": data["coastFire"],
+        "fire": data["fire"],
+        "contributions": data["contributions"],
+        "rebalance": data["rebalance"],
+        "taxLossHarvest": data["taxLossHarvest"],
+        "dividends": data["dividends"],
+        "emergencyFund": data["emergencyFund"],
+        "netWorthPercentile": data["netWorthPercentile"],
+        "insights": data["insights"],
     })
 
 
