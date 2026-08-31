@@ -50,3 +50,5 @@ nw_history.json
 
 # Logs
 *.log
+.server.pid
+server.log

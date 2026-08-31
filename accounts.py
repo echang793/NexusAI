@@ -19,6 +19,14 @@ ASSET_TYPES = [
     "Money Market",
     "401k Cash",
     "IRA Cash",
+    # "Taxable"/"Retirement" are for a manual lump-sum balance that IS the
+    # whole invested account (a 401k total, a robo-advisor portfolio) — as
+    # opposed to "401k Cash"/"IRA Cash", which are just the idle cash sleeve
+    # inside such an account. server.py's _investable_total() specifically
+    # matches on these two type strings to include the balance in CoastFIRE's
+    # invested total, so they need to actually exist here to be selectable.
+    "Taxable",
+    "Retirement",
     "Crypto",
     "Real Estate",
     "Vehicle",
