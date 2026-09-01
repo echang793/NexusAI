@@ -5,5 +5,6 @@ anthropic
 finnhub-python
 python-dotenv
 flask
-# Optional — only needed for bank-balance auto-sync via Plaid (paid service):
-# plaid-python
+# Bank-balance auto-sync via Plaid — free Trial plan covers this at
+# personal scale (see plaid.com/pricing before scaling beyond it):
+plaid-python
