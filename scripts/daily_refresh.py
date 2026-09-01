@@ -35,7 +35,18 @@ def main() -> int:
 
     if plaid_sync.HAS_PLAID:
         result = plaid_sync.pull_balances()
-        print(f"Plaid sync: {result}")
+        print(f"Plaid balance sync: {result}")
+        holdings_result = plaid_sync.pull_investment_holdings()
+        print(f"Plaid holdings sync: {holdings_result}")
+        # Re-read holdings — pull_investment_holdings() may have rewritten
+        # hsa_holdings.csv (via portfolio.json) since `holdings` was loaded
+        # above, and the price/period/risk cache warm-up needs the current list.
+        holdings = server.pf.load_portfolio()
+        tickers = [h["ticker"] for h in holdings]
+        if tickers:
+            server.batch_prices(tickers)
+            server.compute_period_prices(tickers)
+            server.compute_portfolio_risk(holdings)
 
     # Forcing a fresh build refines this month's snapshot via nw_snapshots
     server._data_cache_ts = 0.0
