@@ -94,13 +94,22 @@ def _coerce(rows):
         if not updated:
             import datetime
             updated = datetime.date.today().isoformat()
-        out.append({
+        row = {
             "name": name or atype,
             "type": atype,
             "balance": balance,
             "notes": notes,
             "updated": updated,
-        })
+        }
+        # Optional fields carried through as-is when present — plaid_sync.py
+        # tags its rows with these so a re-sync can update the matching row
+        # instead of duplicating it, without touching manually-added accounts
+        # (which never have plaid_account_id set).
+        if r.get("source"):
+            row["source"] = str(r["source"])
+        if r.get("plaid_account_id"):
+            row["plaid_account_id"] = str(r["plaid_account_id"])
+        out.append(row)
     return out
 
 
