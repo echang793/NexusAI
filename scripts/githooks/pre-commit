@@ -1,0 +1,39 @@
+#!/bin/bash
+# Refuse to commit real financial data or secrets, even if `git add` is run
+# on them by accident. .gitignore already covers these, but a hook catches
+# an explicit `git add -f` or a new sensitive filename .gitignore doesn't
+# yet know about.
+#
+# This is the tracked TEMPLATE (git itself never runs hooks straight out of
+# a tracked path — .git/hooks/ isn't cloned). Run scripts/install-hooks.sh
+# once after cloning this repo (including on a fresh machine) to install it.
+
+set -e
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$STAGED" ] && exit 0
+
+BLOCK_PATTERN='(^|/)(\.env(\..*)?|accounts\.json|portfolio\.json|profile\.json|watchlist\.json|combined_holdings\.csv|.*_holdings\.csv|nw_history\.json|price_cache\.json|period_cache\.json|risk_cache\.json)$'
+
+blocked=$(echo "$STAGED" | grep -E "$BLOCK_PATTERN" || true)
+if [ -n "$blocked" ]; then
+    echo "COMMIT BLOCKED — these files hold real financial data / secrets and should never be committed:"
+    echo "$blocked" | sed 's/^/  /'
+    echo "If one of these genuinely needs tracking, add it explicitly with 'git commit --no-verify' after double-checking its contents."
+    exit 1
+fi
+
+# Catch a Plaid/API-key-shaped secret accidentally pasted into a source file
+# (not just the files above — e.g. hardcoded in a .py during debugging).
+SECRET_PATTERN='access-(production|development|sandbox)-[a-f0-9-]{20,}|PLAID_SECRET\s*=\s*['"'"'"][a-f0-9]{20,}|sk-[a-zA-Z0-9]{20,}|AIza[0-9A-Za-z_-]{20,}'
+
+for f in $STAGED; do
+    [ -f "$f" ] || continue
+    if git diff --cached -- "$f" | grep -E '^\+' | grep -qE "$SECRET_PATTERN"; then
+        echo "COMMIT BLOCKED — $f appears to contain a hardcoded API key/token."
+        echo "Use an environment variable (.env) instead."
+        exit 1
+    fi
+done
+
+exit 0
