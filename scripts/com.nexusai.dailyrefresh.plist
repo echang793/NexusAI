@@ -18,12 +18,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/erichang/Desktop/NexusAI/.venv/bin/python3</string>
-    <string>/Users/erichang/Desktop/NexusAI/scripts/daily_refresh.py</string>
+    <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/.venv/bin/python3</string>
+    <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/daily_refresh.py</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/erichang/Desktop/NexusAI</string>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI</string>
 
   <!-- Fire every day at 07:30 (also catches up at next login if asleep) -->
   <key>StartCalendarInterval</key>
@@ -38,8 +38,8 @@
   <false/>
 
   <key>StandardOutPath</key>
-  <string>/Users/erichang/Desktop/NexusAI/scripts/daily_refresh.log</string>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/daily_refresh.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/erichang/Desktop/NexusAI/scripts/daily_refresh.log</string>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/daily_refresh.log</string>
 </dict>
 </plist>

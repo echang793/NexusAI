@@ -18,12 +18,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/erichang/Desktop/NexusAI/.venv/bin/python3</string>
-    <string>/Users/erichang/Desktop/NexusAI/scripts/monthly_snapshot.py</string>
+    <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/.venv/bin/python3</string>
+    <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/monthly_snapshot.py</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/erichang/Desktop/NexusAI</string>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI</string>
 
   <!-- Fire on the 1st of every month at 09:00 (also catches up at next login if asleep) -->
   <key>StartCalendarInterval</key>
@@ -40,8 +40,8 @@
   <false/>
 
   <key>StandardOutPath</key>
-  <string>/Users/erichang/Desktop/NexusAI/scripts/snapshot.log</string>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/snapshot.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/erichang/Desktop/NexusAI/scripts/snapshot.log</string>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/snapshot.log</string>
 </dict>
 </plist>
