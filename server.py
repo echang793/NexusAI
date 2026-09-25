@@ -149,36 +149,71 @@ def _save_price_cache() -> None:
         pass
 
 
+# A ticker whose fetch failed is retried after this many seconds instead of
+# holding the failure for the full CACHE_TTL_SECONDS.
+_PRICE_RETRY_SECONDS = 60
+
+
 def batch_prices(tickers: list[str]) -> dict[str, float | None]:
     import yfinance as yf
+    from data import latest_price  # per-ticker (5d history) fallback path
     now = time.time()
     ttl = config.CACHE_TTL_SECONDS
 
     with _pcache_lock:
-        need = [t for t in tickers if now - _pcache_ts.get(t, 0) >= ttl]
+        # A missing price (None) is only "fresh" for the short retry window,
+        # whatever its timestamp says — otherwise a failure persisted by an
+        # earlier run would hide a real price for a full TTL.
+        need = [t for t in tickers
+                if now - _pcache_ts.get(t, 0) >= (ttl if _pcache.get(t) is not None else _PRICE_RETRY_SECONDS)]
 
     if need:
+        fresh: dict[str, float] = {}
         try:
             raw = yf.download(need, period="2d", auto_adjust=True, progress=False, threads=True)
             close = raw["Close"] if "Close" in raw else raw
-            with _pcache_lock:
-                for t in need:
-                    try:
-                        col = close[t] if len(need) > 1 else close
-                        _pcache[t] = float(col.dropna().iloc[-1])
-                    except Exception:
-                        _pcache[t] = None
-                    _pcache_ts[t] = now
-            _save_price_cache()
+            for t in need:
+                try:
+                    col = close[t] if len(need) > 1 else close
+                    fresh[t] = float(col.dropna().iloc[-1])
+                except Exception:
+                    pass  # picked up by the per-ticker retry below
         except Exception:
-            with _pcache_lock:
-                for t in need:
-                    if t not in _pcache:
-                        _pcache[t] = None
+            pass
+        # The bulk download drops tickers under Yahoo rate-limits/crumb errors
+        # and often can't align mutual-fund NAV dates (FFLEX/FXAIX), so retry
+        # each miss on its own before giving up on it.
+        for t in need:
+            if t not in fresh:
+                p = latest_price(t)
+                if p is not None:
+                    fresh[t] = p
+        with _pcache_lock:
+            for t in need:
+                if t in fresh:
+                    _pcache[t] = fresh[t]
                     _pcache_ts[t] = now
+                else:
+                    # Never overwrite a good price with None: a None makes the
+                    # dashboard value the position at cost basis and understate
+                    # net worth. Keep the last-known-good price and retry soon.
+                    stale = _pcache.get(t)
+                    _pcache.setdefault(t, None)
+                    _pcache_ts[t] = now - ttl + _PRICE_RETRY_SECONDS
+                    log.warning("price fetch failed for %s; %s", t,
+                                f"keeping last-known-good {stale}" if stale else "no price on record")
+        _save_price_cache()
 
     with _pcache_lock:
         return {t: _pcache.get(t) for t in tickers}
+
+
+def _unpriced_tickers(holdings: list) -> list[str]:
+    """Held tickers with no price on record — the dashboard values these at
+    cost basis, so net worth is understated until they price."""
+    with _pcache_lock:
+        missing = [h["ticker"] for h in holdings if not _pcache.get(h["ticker"])]
+    return list(dict.fromkeys(missing))  # a ticker held in 2 accounts is 2 rows
 
 
 def single_price(ticker: str) -> float | None:
@@ -615,7 +650,8 @@ def build_nexus_data(force: bool = False) -> dict:
 
     acct_list = _build_account_list(positions, extra_accounts)
     net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
-    nw_history = _net_worth_history(net_worth, total_value, acct_list)
+    unpriced = _unpriced_tickers(holdings)
+    nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced)
     # "Invested" = holdings positions + manual accounts that are actually
     # invested (e.g. RoboInvestor), not cash/checking — the balance actually
     # left to compound untouched. Shared by CoastFIRE and full-FIRE.
@@ -693,6 +729,7 @@ def build_nexus_data(force: bool = False) -> dict:
         "positions": positions,
         "accounts": acct_list,
         "portfolioValue": round(total_value, 2),
+        "pricesIncomplete": unpriced,  # held tickers valued at cost basis (no price) — net worth understated
         "totalCost": round(total_cost, 2),
         "totalPL": round(total_pl, 2),
         "totalPLPct": round(total_pl_pct, 4),
@@ -753,7 +790,8 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
             extra_accounts = ac.load_accounts()
             acct_list = _build_account_list(positions, extra_accounts)
             net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
-            nw_history = _net_worth_history(net_worth, total_value, acct_list)
+            unpriced = _unpriced_tickers(holdings)
+            nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced)
             invested_total = _investable_total(total_value, extra_accounts)
             coastfire_status = cf.compute(raw_profile, invested_total)
 
@@ -846,6 +884,7 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
                         "positions": positions,
                         "accounts": acct_list,
                         "portfolioValue": round(total_value, 2),
+                        "pricesIncomplete": unpriced,
                         "totalCost": round(total_cost, 2),
                         "totalPL": round(total_pl, 2),
                         "totalPLPct": round(total_pl_pct, 4),
@@ -1011,19 +1050,27 @@ def _investable_total(total_value: float, extra_accounts: list) -> float:
     return total_value + manual_invested
 
 
-def _net_worth_history(net_worth: float, total_value: float, acct_list: list) -> list:
+def _net_worth_history(net_worth: float, total_value: float, acct_list: list,
+                       prices_complete: bool = True) -> list:
     """Record this month's snapshot, then return REAL history.
 
     Falls back to a synthetic seed curve (anchored to today's real net worth)
     only until at least 2 real monthly snapshots have accrued.
+
+    When prices_complete is False (some held ticker has no price, so its
+    position was valued at cost basis) the snapshot is NOT written — a
+    partial-data number must never overwrite this month's real history.
     """
     liabilities = sum(abs(a["balance"]) for a in acct_list if a.get("type") == "Debt")
     investments = total_value
     other_assets = net_worth - investments
-    try:
-        nw_snapshots.record_snapshot(net_worth, investments, other_assets, liabilities)
-    except Exception:
-        pass
+    if prices_complete:
+        try:
+            nw_snapshots.record_snapshot(net_worth, investments, other_assets, liabilities)
+        except Exception:
+            pass
+    else:
+        log.warning("skipping net-worth snapshot: some held tickers are unpriced")
 
     if nw_snapshots.has_real_history(2):
         return nw_snapshots.load_history()

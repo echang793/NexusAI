@@ -50,7 +50,11 @@ def test_analyze_rejects_bad_ticker(client):
     assert r.get_json()["ok"] is False
 
 
-def test_sync_balances_noop_without_plaid(client):
+def test_sync_balances_noop_without_plaid(client, monkeypatch):
+    # Force "unconfigured" — with real Plaid keys in .env this route would
+    # otherwise run a live sync and rewrite accounts.json on every test run.
+    import plaid_sync
+    monkeypatch.setattr(plaid_sync, "HAS_PLAID", False)
     r = client.post("/api/sync-balances")
     d = r.get_json()
     assert d["ok"] is False  # Plaid not configured by default
@@ -109,3 +113,102 @@ def test_account_coerce_adds_timestamp():
 def test_account_liability_detection():
     assert ac.is_liability("Credit Card")
     assert not ac.is_liability("HYSA")
+
+
+# --- Price cache resilience ------------------------------------------------
+# A failed yfinance fetch must never replace a good cached price with None:
+# the dashboard values a None-priced position at cost basis (avg_cost), which
+# silently understates net worth (found 2026-09-23: MU/TQQQ/FFLEX/FXAIX).
+@pytest.fixture
+def price_env(tmp_path, monkeypatch):
+    """Isolated price cache — never touches the real price_cache.json or
+    prunes against the real portfolio."""
+    monkeypatch.setattr(server, "PRICE_CACHE_FILE", str(tmp_path / "price_cache.json"))
+    monkeypatch.setattr(server, "_known_tickers", lambda: set())
+    monkeypatch.setattr(server, "_pcache", {})
+    monkeypatch.setattr(server, "_pcache_ts", {})
+
+
+def test_batch_prices_keeps_last_good_price_when_refresh_fails(price_env, monkeypatch):
+    import data as data_mod
+    import pandas as pd
+    server._pcache["AAA"] = 10.0
+    server._pcache_ts["AAA"] = 0.0  # expired -> forces a refresh
+    monkeypatch.setattr("yfinance.download", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(data_mod, "latest_price", lambda t: None)
+    assert server.batch_prices(["AAA"]) == {"AAA": 10.0}
+
+
+def test_batch_prices_retries_missed_ticker_individually(price_env, monkeypatch):
+    import data as data_mod
+    import pandas as pd
+    raw = pd.DataFrame({("Close", "AAA"): [1.0, 2.0], ("Close", "BBB"): [float("nan"), float("nan")]})
+    monkeypatch.setattr("yfinance.download", lambda *a, **k: raw)
+    monkeypatch.setattr(data_mod, "latest_price", lambda t: {"BBB": 42.5}.get(t))
+    assert server.batch_prices(["AAA", "BBB"]) == {"AAA": 2.0, "BBB": 42.5}
+
+
+def test_failed_price_is_retried_soon_not_after_full_ttl(price_env, monkeypatch):
+    import time
+    import data as data_mod
+    import pandas as pd
+    monkeypatch.setattr("yfinance.download", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(data_mod, "latest_price", lambda t: None)
+    server.batch_prices(["AAA"])
+    seconds_until_retry = server.config.CACHE_TTL_SECONDS - (time.time() - server._pcache_ts["AAA"])
+    assert seconds_until_retry <= 120  # not stuck as None for the whole 15-min TTL
+
+
+def test_unpriced_tickers_reports_missing_prices(price_env):
+    server._pcache.update({"AAA": 1.0, "BBB": None})
+    assert server._unpriced_tickers([{"ticker": "AAA"}, {"ticker": "BBB"}, {"ticker": "CCC"}]) == ["BBB", "CCC"]
+
+
+def test_snapshot_not_overwritten_when_prices_incomplete(tmp_path, monkeypatch):
+    f = tmp_path / "nw.json"
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(f))
+    nw_snapshots.record_snapshot(100000, 80000, 20000, 0)
+    server._net_worth_history(90000.0, 70000.0, [], prices_complete=False)
+    assert nw_snapshots.load_history()[-1]["value"] == 100000  # bad low number not persisted
+    server._net_worth_history(105000.0, 85000.0, [], prices_complete=True)
+    assert nw_snapshots.load_history()[-1]["value"] == 105000  # complete data still updates
+
+
+def test_data_js_exposes_prices_incomplete(client):
+    assert b"pricesIncomplete" in client.get("/data.js").data
+
+
+def test_none_price_is_not_treated_as_fresh_for_full_ttl(price_env, monkeypatch):
+    # A None entry (e.g. persisted by an older run, or a failed fetch) must
+    # be retried after the short retry window, not held for the full 15-min
+    # TTL. Stamped 2 min ago = well inside the TTL, past the 60s retry window
+    # (the real case: a failure persisted at 09:49, server restarted 09:53).
+    import time
+    import data as data_mod
+    import pandas as pd
+    server._pcache["AAA"] = None
+    server._pcache_ts["AAA"] = time.time() - 120
+    monkeypatch.setattr("yfinance.download", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(data_mod, "latest_price", lambda t: 7.5)
+    assert server.batch_prices(["AAA"]) == {"AAA": 7.5}
+
+
+def test_unpriced_tickers_lists_each_ticker_once(price_env):
+    # A ticker held in two accounts appears as two holdings rows.
+    server._pcache.update({"AAA": None})
+    assert server._unpriced_tickers([{"ticker": "AAA"}, {"ticker": "AAA"}]) == ["AAA"]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_user_data(tmp_path_factory):
+    """Keep the suite off the live price/period/risk caches and net-worth
+    history — route/build tests run real builds that would otherwise write
+    (and, with a flaky yfinance, poison) the user's real files."""
+    d = tmp_path_factory.mktemp("userdata")
+    mp = pytest.MonkeyPatch()
+    mp.setattr(server, "PRICE_CACHE_FILE", str(d / "price_cache.json"))
+    mp.setattr(server, "PERIOD_CACHE_FILE", str(d / "period_cache.json"))
+    mp.setattr(server, "RISK_CACHE_FILE", str(d / "risk_cache.json"))
+    mp.setattr(nw_snapshots, "SNAPSHOT_FILE", str(d / "nw_history.json"))
+    yield
+    mp.undo()
