@@ -2,9 +2,15 @@
 
 CoastFIRE = you've saved enough invested assets that, left alone to compound
 at an assumed real return, they'll grow to your FIRE number by retirement
-age with zero further contributions. "Coast number needed today" shrinks
-each year you age toward retirement (fewer years left to compound), so this
-is meant to be re-checked yearly as age/invested balance update.
+age with zero further contributions. "Coast number needed today" actually
+RISES each year you age toward retirement — fewer years left to compound
+means you need to already be closer to the final number, asymptotically
+reaching the FIRE number itself right at retirement. (Correction: an
+earlier version of this comment had the direction backwards.) This is
+meant to be re-checked yearly as age/invested balance update — if your
+invested balance grows exactly at the assumed rate, whether you're
+"coasted" is time-invariant; only extra contributions or above-assumption
+returns actually close a gap.
 """
 
 
