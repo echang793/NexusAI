@@ -43,6 +43,22 @@ install the launchd plists (see Gotchas).
   **Scheduled via launchd** (`com.nexusai.dailyrefresh`, 07:30 daily).
 - **`scripts/monthly_snapshot.py`** — records the net-worth snapshot.
   **Scheduled via launchd** (`com.nexusai.snapshot`, 1st of month 09:00).
+- **`scripts/webull_import.py`** — loads Webull data (pulled through the Claude Webull
+  connector, which only works in an interactive session) into the Webull holdings CSVs,
+  Webull cash, `combined_holdings.csv` and `portfolio.json`. Validates every position and
+  total against Webull's own numbers and writes nothing on a mismatch; both the taxable and
+  Roth accounts must be present; backs up to `backups/` first (gitignored).
+- **`scripts/monthly_report.py`** — plain-text month-over-month report (net worth, CoastFIRE
+  progress, per-account changes, stale-data warnings) built only from stored files
+  (`nw_history.json` snapshots + `accounts.json` dates); never recomputes net worth. Writes
+  `reports/YYYY-MM.txt` (gitignored).
+- **Monthly report task** — a Claude scheduled task, `nexusai-monthly-report` (manage it in the
+  app's Scheduled section, not in this repo), runs ~08:40 on the 1st and emails the report.
+  The scheduled session cannot see the Webull connector (confirmed in a test run), so Webull
+  holdings are NOT refreshed automatically: refresh them in an interactive session ("update
+  NexusAI for <month>"), which also re-records the month with `monthly_snapshot.py --force`.
+  The task only runs while the Claude desktop app is open (otherwise on next launch), and its
+  tool approvals must be granted once via "Run now" or runs stall on a permission prompt.
 - **`scripts/plaid_link.py`** — one-time local tool to link one institution via
   Plaid Link and print its access token (run once per institution).
 - **`scripts/install-hooks.sh`** — installs the pre-commit guard (blocks
@@ -82,7 +98,12 @@ install the launchd plists (see Gotchas).
   `pull_investment_holdings()` syncs ticker-level HSA positions into
   `hsa_holdings.csv` plus a cash-sleeve row. Webull has no Plaid support, so
   its accounts (roughly two thirds of net worth) stay manually refreshed.
-- `nw_snapshots.py` — monthly net-worth history (`nw_history.json`).
+- `nw_snapshots.py` — monthly net-worth history (`nw_history.json`). One bucket per
+  month and the FIRST reading of the month wins (the daily job and dashboard can't
+  overwrite it). To re-record after manually updating Webull holdings, run
+  `.venv/bin/python3 scripts/monthly_snapshot.py --force`. Jul-Sep 2026 buckets are
+  month-end readings from before this rule; from Oct 2026 on they're first-of-month.
+  Each snapshot also stores `details` (per-account balances + CoastFIRE numbers) for the report.
 - `scripts/import_holdings.py` / `scripts/apply_snapshot.py` — brokerage
   CSV import pipeline (drop exports in `imports/`).
 - `config.py` — central env-driven config/thresholds; loads `.env` via

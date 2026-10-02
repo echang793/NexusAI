@@ -13,7 +13,7 @@ set -e
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 [ -z "$STAGED" ] && exit 0
 
-BLOCK_PATTERN='(^|/)(\.env(\..*)?|accounts\.json|portfolio\.json|profile\.json|watchlist\.json|combined_holdings\.csv|.*_holdings\.csv|nw_history\.json|price_cache\.json|period_cache\.json|risk_cache\.json)$'
+BLOCK_PATTERN='(^|/)(backups|reports)/|(^|/)(\.env(\..*)?|accounts\.json|portfolio\.json|profile\.json|watchlist\.json|combined_holdings\.csv|.*_holdings\.csv|nw_history\.json|price_cache\.json|period_cache\.json|risk_cache\.json)$'
 
 blocked=$(echo "$STAGED" | grep -E "$BLOCK_PATTERN" || true)
 if [ -n "$blocked" ]; then

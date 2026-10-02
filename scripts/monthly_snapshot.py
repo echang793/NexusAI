@@ -2,10 +2,13 @@
 """Headless monthly net-worth snapshot — runs without the web server.
 
 Pulls live prices, recomputes net worth, and records this month's snapshot to
-nw_history.json. Safe to run repeatedly (one bucket per calendar month).
+nw_history.json. The first reading of a month wins; re-running is a no-op
+unless --force is given.
 
 Usage:
-    .venv/bin/python3 scripts/monthly_snapshot.py
+    .venv/bin/python3 scripts/monthly_snapshot.py            # record if not yet recorded
+    .venv/bin/python3 scripts/monthly_snapshot.py --force    # re-record this month (e.g.
+                                                             # after updating Webull holdings)
 Scheduled monthly via scripts/com.nexusai.snapshot.plist (launchd).
 """
 
@@ -20,6 +23,8 @@ import server  # noqa: E402
 
 
 def main() -> int:
+    if "--force" in sys.argv[1:]:
+        server.nw_snapshots.OVERWRITE_EXISTING = True
     holdings = server.pf.load_portfolio()
     tickers = [h["ticker"] for h in holdings]
     if tickers:

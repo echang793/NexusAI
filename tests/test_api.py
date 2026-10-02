@@ -93,14 +93,44 @@ def test_advisor_empty_portfolio():
 
 
 # --- Snapshots -------------------------------------------------------------
-def test_snapshot_roundtrip(tmp_path, monkeypatch):
+def test_snapshot_keeps_first_reading_of_month(tmp_path, monkeypatch):
+    # Net worth is tracked as the first reading of each month (so months are
+    # comparable); later runs the same month must not overwrite it.
     f = tmp_path / "nw.json"
     monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(f))
     nw_snapshots.record_snapshot(100000, 80000, 20000, 0)
-    nw_snapshots.record_snapshot(105000, 85000, 20000, 0)  # same month → update
+    nw_snapshots.record_snapshot(105000, 85000, 20000, 0)  # same month: ignored
     hist = nw_snapshots.load_history()
     assert len(hist) == 1  # one bucket per month
-    assert hist[0]["value"] == 105000
+    assert hist[0]["value"] == 100000
+
+
+def test_snapshot_force_overwrites_the_month(tmp_path, monkeypatch):
+    # After a manual data update (e.g. new Webull positions) the month's
+    # snapshot can be explicitly re-recorded.
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    nw_snapshots.record_snapshot(100000, 80000, 20000, 0)
+    nw_snapshots.record_snapshot(105000, 85000, 20000, 0, force=True)
+    assert nw_snapshots.load_history()[0]["value"] == 105000
+
+
+def test_snapshot_force_flag_is_honored_module_wide(tmp_path, monkeypatch):
+    # monthly_snapshot.py --force sets a module flag because the write happens
+    # deep inside build_nexus_data, where a parameter can't be passed.
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    nw_snapshots.record_snapshot(100000, 80000, 20000, 0)
+    monkeypatch.setattr(nw_snapshots, "OVERWRITE_EXISTING", True)
+    nw_snapshots.record_snapshot(105000, 85000, 20000, 0)
+    assert nw_snapshots.load_history()[0]["value"] == 105000
+
+
+def test_snapshot_new_month_does_not_touch_earlier_months(tmp_path, monkeypatch):
+    f = tmp_path / "nw.json"
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(f))
+    f.write_text('{"snapshots": {"2020-01": {"date": "2020-01-01", "value": 1, "investments": 1, "otherAssets": 0, "liabilities": 0, "recordedAt": "2020-01-01"}}}')
+    nw_snapshots.record_snapshot(100000, 80000, 20000, 0)
+    hist = nw_snapshots.load_history()
+    assert [h["value"] for h in hist] == [1, 100000]
 
 
 # --- Accounts --------------------------------------------------------------
@@ -171,7 +201,16 @@ def test_snapshot_not_overwritten_when_prices_incomplete(tmp_path, monkeypatch):
     server._net_worth_history(90000.0, 70000.0, [], prices_complete=False)
     assert nw_snapshots.load_history()[-1]["value"] == 100000  # bad low number not persisted
     server._net_worth_history(105000.0, 85000.0, [], prices_complete=True)
-    assert nw_snapshots.load_history()[-1]["value"] == 105000  # complete data still updates
+    assert nw_snapshots.load_history()[-1]["value"] == 100000  # month's first reading is kept
+
+
+def test_snapshot_not_written_first_when_prices_incomplete(tmp_path, monkeypatch):
+    # With first-reading-wins, a partial-price reading must not become the month's record.
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    server._net_worth_history(90000.0, 70000.0, [], prices_complete=False)
+    assert nw_snapshots.load_history() == []
+    server._net_worth_history(105000.0, 85000.0, [], prices_complete=True)
+    assert nw_snapshots.load_history()[-1]["value"] == 105000
 
 
 def test_data_js_exposes_prices_incomplete(client):
@@ -212,3 +251,32 @@ def _isolate_user_data(tmp_path_factory):
     mp.setattr(nw_snapshots, "SNAPSHOT_FILE", str(d / "nw_history.json"))
     yield
     mp.undo()
+
+
+# --- Snapshot details (per-account + CoastFIRE, for the monthly report) -------
+def test_snapshot_stores_details_when_given(tmp_path, monkeypatch):
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    details = {"accounts": {"Webull Brokerage": 100000, "TOTAL CHECKING": 3500},
+               "coast": {"invested": 269000, "needed": 281000}}
+    nw_snapshots.record_snapshot(100000, 80000, 20000, 0, details=details)
+    assert nw_snapshots.load_history()[0]["details"] == details
+
+
+def test_snapshot_without_details_has_no_details_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    nw_snapshots.record_snapshot(100000, 80000, 20000, 0)
+    assert "details" not in nw_snapshots.load_history()[0]
+
+
+def test_account_breakdown_excludes_zero_and_rounds(price_env):
+    accts = [{"name": "A", "balance": 1234.56, "type": "Taxable"},
+             {"name": "B", "balance": 0.0, "type": "Cash"},
+             {"name": "Card", "balance": -250.4, "type": "Debt"}]
+    assert server._account_breakdown(accts) == {"A": 1235, "Card": -250}
+
+
+def test_net_worth_history_passes_details_through(tmp_path, monkeypatch):
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    server._net_worth_history(105000.0, 85000.0, [], prices_complete=True,
+                              details={"accounts": {"X": 1}})
+    assert nw_snapshots.load_history()[-1]["details"] == {"accounts": {"X": 1}}

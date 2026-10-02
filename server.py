@@ -651,12 +651,13 @@ def build_nexus_data(force: bool = False) -> dict:
     acct_list = _build_account_list(positions, extra_accounts)
     net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
     unpriced = _unpriced_tickers(holdings)
-    nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced)
     # "Invested" = holdings positions + manual accounts that are actually
     # invested (e.g. RoboInvestor), not cash/checking — the balance actually
     # left to compound untouched. Shared by CoastFIRE and full-FIRE.
     invested_total = _investable_total(total_value, extra_accounts)
     coastfire_status = cf.compute(raw_profile, invested_total)
+    nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced,
+                                    details=_snapshot_details(acct_list, coastfire_status))
 
     sector_map: dict[str, float] = {}
     for p in positions:
@@ -791,9 +792,10 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
             acct_list = _build_account_list(positions, extra_accounts)
             net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
             unpriced = _unpriced_tickers(holdings)
-            nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced)
             invested_total = _investable_total(total_value, extra_accounts)
             coastfire_status = cf.compute(raw_profile, invested_total)
+            nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced,
+                                            details=_snapshot_details(acct_list, coastfire_status))
 
             # 3. Featured ticker — fundamentals + chart history (skip LLM for speed)
             featured_ticker_use = positions[0]["ticker"] if positions else featured_ticker
@@ -1050,8 +1052,33 @@ def _investable_total(total_value: float, extra_accounts: list) -> float:
     return total_value + manual_invested
 
 
+def _account_breakdown(acct_list: list) -> dict:
+    """{account name: rounded balance} for the monthly snapshot's details.
+    Zero balances are dropped; debts stay negative."""
+    out = {}
+    for a in acct_list:
+        bal = round(float(a.get("balance") or 0))
+        if bal:
+            out[a["name"]] = bal
+    return out
+
+
+def _snapshot_details(acct_list: list, coastfire_status: dict) -> dict:
+    """What gets stored with each month's snapshot for the monthly report."""
+    d = {"accounts": _account_breakdown(acct_list)}
+    if coastfire_status.get("enabled"):
+        d["coast"] = {
+            "invested": coastfire_status["invested"],
+            "needed": coastfire_status["coastNumberNeeded"],
+            "fireNumber": coastfire_status["fireNumber"],
+            "pctOfCoast": coastfire_status["pctOfCoast"],
+            "yearsToRetire": coastfire_status["yearsToRetire"],
+        }
+    return d
+
+
 def _net_worth_history(net_worth: float, total_value: float, acct_list: list,
-                       prices_complete: bool = True) -> list:
+                       prices_complete: bool = True, details: dict | None = None) -> list:
     """Record this month's snapshot, then return REAL history.
 
     Falls back to a synthetic seed curve (anchored to today's real net worth)
@@ -1066,7 +1093,8 @@ def _net_worth_history(net_worth: float, total_value: float, acct_list: list,
     other_assets = net_worth - investments
     if prices_complete:
         try:
-            nw_snapshots.record_snapshot(net_worth, investments, other_assets, liabilities)
+            nw_snapshots.record_snapshot(net_worth, investments, other_assets, liabilities,
+                                         details=details)
         except Exception:
             pass
     else:

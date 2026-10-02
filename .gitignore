@@ -52,3 +52,7 @@ nw_history.json
 *.log
 .server.pid
 server.log
+
+# Monthly report outputs + holdings backups — real financial data
+reports/
+backups/
