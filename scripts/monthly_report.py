@@ -95,6 +95,7 @@ def build_report(snapshots, accounts, files, today):
             warnings.append(f"{label} last updated {age} days ago — this month's figures "
                             f"use old share counts.")
     rep["warnings"] = warnings
+    rep["holdings_refreshed"] = min(files.values()) if files else None
     return rep
 
 
@@ -160,6 +161,8 @@ def render_text(rep):
 
     # Freshness
     L.append("HEADS UP")
+    if rep.get("holdings_refreshed"):
+        L.append(f"  Webull holdings last refreshed: {rep['holdings_refreshed']:%b %-d}.")
     if rep["warnings"]:
         for w in rep["warnings"]:
             L.append(f"  - {w}")

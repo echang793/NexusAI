@@ -126,3 +126,16 @@ def test_all_fresh_says_so():
 def test_plain_text_has_no_markdown():
     t = text([OCT, NOV])
     assert "**" not in t and "##" not in t and "|" not in t  # email body is plain text
+
+
+def test_always_states_when_webull_holdings_were_last_refreshed():
+    # An unattended run can't know whether Webull was refreshed by hand earlier,
+    # so the report states the real date instead of guessing.
+    files = {"Webull taxable holdings": datetime.date(2026, 10, 28),
+             "Webull Roth holdings": datetime.date(2026, 10, 2)}
+    t = text([OCT, NOV], files=files)
+    assert "Webull holdings last refreshed: Oct 2" in t  # the OLDER of the two files
+
+
+def test_no_webull_line_when_file_dates_unknown():
+    assert "last refreshed" not in text([OCT, NOV])
