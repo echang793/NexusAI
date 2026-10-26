@@ -19,6 +19,8 @@ import dividends as dv
 import fire as fr
 import insights as ins
 import nw_snapshots
+import daily_history
+import analytics
 import planning as plan
 import portfolio as pf
 import profile as pr
@@ -658,6 +660,7 @@ def build_nexus_data(force: bool = False) -> dict:
     coastfire_status = cf.compute(raw_profile, invested_total)
     nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced,
                                     details=_snapshot_details(acct_list, coastfire_status))
+    _record_daily(net_worth, acct_list, positions, complete=not unpriced)
 
     sector_map: dict[str, float] = {}
     for p in positions:
@@ -1074,7 +1077,23 @@ def _snapshot_details(acct_list: list, coastfire_status: dict) -> dict:
             "pctOfCoast": coastfire_status["pctOfCoast"],
             "yearsToRetire": coastfire_status["yearsToRetire"],
         }
+        odds = coastfire_status.get("odds") or {}
+        if odds.get("successPct") is not None:
+            d["coast"].update(oddsPct=odds["successPct"], p10=odds["p10"],
+                              p50=odds["p50"], p90=odds["p90"])
     return d
+
+
+def _record_daily(net_worth: float, acct_list: list, positions: list, complete: bool) -> None:
+    """Store today's per-account balances + per-holding quantity/price so a
+    change in net worth can be explained later (attribution.py). Ticker-backed
+    cards (`_computed`) are skipped here — their value is in `positions`."""
+    try:
+        accounts = {a["name"]: a["balance"] for a in acct_list if not a.get("_computed")}
+        stats = analytics.compute(positions, _div_cache, _classify_asset_class, risk=_risk_metrics())
+        daily_history.record_today(net_worth, accounts, positions, complete, analytics=stats)
+    except Exception as e:
+        log.warning("daily history not recorded: %s", e)
 
 
 def _net_worth_history(net_worth: float, total_value: float, acct_list: list,

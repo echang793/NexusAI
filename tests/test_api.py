@@ -15,6 +15,7 @@ sys.path.insert(0, ROOT)
 import server  # noqa: E402
 import nw_snapshots  # noqa: E402
 import accounts as ac  # noqa: E402
+import daily_history  # noqa: E402
 
 
 @pytest.fixture
@@ -249,6 +250,7 @@ def _isolate_user_data(tmp_path_factory):
     mp.setattr(server, "PERIOD_CACHE_FILE", str(d / "period_cache.json"))
     mp.setattr(server, "RISK_CACHE_FILE", str(d / "risk_cache.json"))
     mp.setattr(nw_snapshots, "SNAPSHOT_FILE", str(d / "nw_history.json"))
+    mp.setattr(daily_history, "HISTORY_FILE", str(d / "daily_history.json"))
     yield
     mp.undo()
 
@@ -280,3 +282,35 @@ def test_net_worth_history_passes_details_through(tmp_path, monkeypatch):
     server._net_worth_history(105000.0, 85000.0, [], prices_complete=True,
                               details={"accounts": {"X": 1}})
     assert nw_snapshots.load_history()[-1]["details"] == {"accounts": {"X": 1}}
+
+
+# --- Daily history is written by every build ----------------------------------
+def test_build_records_today_in_daily_history():
+    import datetime
+    server.build_nexus_data(force=True)
+    today = datetime.date.today().isoformat()
+    day = daily_history.load_days()[today]
+    assert day["netWorth"] is not None
+    # ticker-backed (computed) cards live in `holdings`, not `accounts`
+    computed_cards = {"Webull Brokerage", "Webull Roth IRA", "Fidelity HSA", "Fidelity 401(k)"}
+    assert not computed_cards & set(day["accounts"]), day["accounts"]
+    assert isinstance(day["holdings"], dict)
+
+
+def test_unpriced_build_is_stored_as_incomplete(monkeypatch):
+    import datetime
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: ["FAKE"])
+    daily_history.record_day(datetime.date.today().isoformat(), 1, {}, [], True)
+    server.build_nexus_data(force=True)
+    # an earlier complete reading must survive an incomplete one
+    assert daily_history.load_days()[datetime.date.today().isoformat()]["complete"] is True
+
+
+def test_build_stores_analytics_with_the_daily_record(monkeypatch):
+    import datetime
+    # Other tests leave unpriced fake tickers behind; pin "all priced" so this
+    # build is a complete reading that may replace any earlier record today.
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    server.build_nexus_data(force=True)
+    a = daily_history.load_days()[datetime.date.today().isoformat()].get("analytics")
+    assert a is not None and "top5Pct" in a and "allocation" in a

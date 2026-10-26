@@ -59,6 +59,14 @@ install the launchd plists (see Gotchas).
   NexusAI for <month>"), which also re-records the month with `monthly_snapshot.py --force`.
   The task only runs while the Claude desktop app is open (otherwise on next launch), and its
   tool approvals must be granted once via "Run now" or runs stall on a permission prompt.
+- **`scripts/watchdog.py`** — checks `health.json` (written by `daily_refresh.py` after every run) and
+  raises a macOS notification + `reports/alerts.log` entry when the daily job hasn't run in 30h, a
+  step failed, a ticker is unpriced, or a Plaid balance is >3 days stale. **Scheduled via launchd**
+  (`com.nexusai.watchdog`, 10:00 daily), separate from the job it watches. Notifications are
+  de-duplicated (once per distinct problem set per 24h; `alert_state.json`).
+- **`scripts/scorecard_run.py`** — replays the app's BUY/SELL/HOLD rules (`advisory.get_advice`) over ~5y
+  of the held tickers and compares the next 1/3-month return with SPY; writes `reports/scorecard.txt`
+  and `.json`. Network. Finding as of Oct 2026: no edge over the baseline. The monthly task refreshes it.
 - **`scripts/plaid_link.py`** — one-time local tool to link one institution via
   Plaid Link and print its access token (run once per institution).
 - **`scripts/install-hooks.sh`** — installs the pre-commit guard (blocks
@@ -67,7 +75,7 @@ install the launchd plists (see Gotchas).
 ## Commands
 - Run server: `./scripts/run_server.sh` → http://localhost:5001
 - Run legacy Streamlit UI: `./run.sh` → http://localhost:8502
-- Test: `.venv/bin/python3 -m pytest tests/ -q` — 20 passed. `pytest` is not in
+- Test: `.venv/bin/python3 -m pytest tests/ -q` — 159 passed. `pytest` is not in
   `requirements.txt`; install it. The suite is hermetic: a session fixture
   redirects the price/period/risk caches and `nw_history.json` to a temp dir,
   and Plaid is forced to "unconfigured". yfinance stderr noise for fake tickers
@@ -104,6 +112,19 @@ install the launchd plists (see Gotchas).
   `.venv/bin/python3 scripts/monthly_snapshot.py --force`. Jul-Sep 2026 buckets are
   month-end readings from before this rule; from Oct 2026 on they're first-of-month.
   Each snapshot also stores `details` (per-account balances + CoastFIRE numbers) for the report.
+- `daily_history.py` / `attribution.py` — `daily_history.json` keeps one record per day (per-account
+  balances for non-ticker accounts, quantity+price per holding, `complete` flag, the `analytics` blob),
+  written by every `build_nexus_data`. `attribution.attribute_range()` splits a period's change into
+  market moves / new shares / other accounts (exact identity: q0*(p1-p0) + (q1-q0)*p1; incomplete days
+  skipped). Daily records began 2026-10-26, so older months can't be attributed.
+- `analytics.py` — pure concentration / individual-stock share / multi-account overlap / tax-placement /
+  asset-class mix, stored daily with the record. Fund detection is a heuristic (known broad ETFs, 5-letter
+  `...X` mutual funds, ETF/fund sector labels). Brokerage and Roth hold many of the same tickers by design.
+- `health.py` — `Runner` (steps run independently; one failure doesn't stop the rest) + `evaluate()`.
+- `scorecard.py` — pure functions behind `scripts/scorecard_run.py`.
+- `coastfire.odds()` — seeded Monte Carlo (zero further contributions): success %, p10/p50/p90 at
+  retirement, low/base/high return scenarios. `compute()["odds"]` uses a fixed seed so monthly numbers
+  only move when inputs do; stored in each snapshot's `details.coast`.
 - `scripts/import_holdings.py` / `scripts/apply_snapshot.py` — brokerage
   CSV import pipeline (drop exports in `imports/`).
 - `config.py` — central env-driven config/thresholds; loads `.env` via
@@ -132,6 +153,11 @@ install the launchd plists (see Gotchas).
   silently excludes them; `401k Cash`/`IRA Cash` mean just a cash sleeve.
   Proprietary plan fund codes (e.g. `NON40*`) can't be priced by yfinance —
   track those as a lump-sum `Retirement` account, not as holdings.
+- **Daily-job health.** `scripts/daily_refresh.py` exits 1 and writes `health.json` when any step fails,
+  but keeps going so prices and the snapshot still happen. Check `launchctl print gui/$(id -u)/com.nexusai.watchdog`
+  and `reports/alerts.log` (not just `daily_refresh.log`) to see whether anything has been flagged.
+- **Report sections need data.** WHY IT MOVED needs a full month of `daily_history.json`; the first
+  report with a partial window says so. PORTFOLIO CHECK reads the newest day's `analytics`.
 - **launchd plists.** The templates in `scripts/` still contain the absolute
   path from the old iCloud location. The installed copies in
   `~/Library/LaunchAgents/` are generated from them with a path swap
@@ -146,9 +172,10 @@ install the launchd plists (see Gotchas).
   file`). The per-ticker fallback covers it, but expect noisy first-run logs.
 
 ## Do NOT touch
-- `scripts/com.nexusai.dailyrefresh.plist`, `scripts/com.nexusai.snapshot.plist`
+- `scripts/com.nexusai.dailyrefresh.plist`, `scripts/com.nexusai.snapshot.plist`,
+  `scripts/com.nexusai.watchdog.plist`
   — live launchd schedules; edits require re-running `launchctl unload`/`load`.
 - `portfolio.json`, `accounts.json`, `profile.json`, `*_holdings.csv`,
-  `nw_history.json`, `*_cache.json` — real financial data, gitignored.
+  `nw_history.json`, `daily_history.json`, `health.json`, `alert_state.json`, `*_cache.json` — real financial data, gitignored.
 - `.env` — holds Plaid credentials and API keys; keep it `chmod 600`, never
   commit (the pre-commit hook blocks it).

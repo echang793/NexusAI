@@ -38,6 +38,9 @@ price_cache.json
 period_cache.json
 risk_cache.json
 nw_history.json
+daily_history.json
+health.json
+alert_state.json
 .odds_cache/
 
 # Local export/archive artifacts

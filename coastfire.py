@@ -60,4 +60,59 @@ def compute(profile: dict, invested: float) -> dict:
         "onTrack": on_track,
         "projectedAtRetirement": round(projected),
         "projectedSurplus": round(projected - target),
+        # Fixed seed: the same inputs give the same odds, so month-to-month
+        # changes reflect the portfolio, not simulation noise.
+        "odds": odds(profile, invested, trials=2000, seed=42),
     }
+
+
+def odds(profile: dict, invested: float, trials: int = 2000, vol: float = 0.15,
+         seed: int | None = None, band_pts: float = 3.0) -> dict:
+    """Odds that `invested`, left alone until retirement, reaches the FIRE number.
+
+    compute() answers with one smooth rate (default 7%), which hides how wide
+    the real outcomes are. This draws a random annual return each year
+    (normal around the assumed rate, std dev `vol`) and reports:
+      successPct  - share of paths ending at or above the FIRE number
+      p10/p50/p90 - balance at retirement for an unlucky / typical / lucky path
+      scenarios   - fixed-rate projections at (rate - band_pts), rate, (rate + band_pts)
+    `vol` of 15% suits a broad stock mix; a tech-heavy portfolio runs hotter.
+    Seed it for repeatable numbers (tests); leave None in production.
+    """
+    import random
+    age = int(profile.get("age", 30) or 30)
+    retire_age = int(profile.get("coastfire_retire_age", 65) or 65)
+    annual_spend = float(profile.get("coastfire_annual_spend", 0) or 0)
+    return_pct = float(profile.get("coastfire_return_pct", 7.0) or 7.0)
+    mean = return_pct / 100.0
+    years = max(0, retire_age - age)
+    target = fire_number(annual_spend)
+    if target <= 0:
+        return {"successPct": None, "p10": None, "p50": None, "p90": None, "scenarios": None,
+                "trials": 0, "volPct": round(vol * 100, 1)}
+
+    def fixed(rate_pct):
+        return round(invested * (1.0 + rate_pct / 100.0) ** years)
+
+    scenarios = {"low": fixed(return_pct - band_pts), "base": fixed(return_pct),
+                 "high": fixed(return_pct + band_pts)}
+    if years == 0:
+        done = 100.0 if invested >= target else 0.0
+        return {"successPct": done, "p10": round(invested), "p50": round(invested),
+                "p90": round(invested), "scenarios": scenarios, "trials": 0,
+                "volPct": round(vol * 100, 1)}
+
+    rng = random.Random(seed)
+    finals = []
+    for _ in range(trials):
+        bal = invested
+        for _y in range(years):
+            bal *= 1.0 + max(-0.99, rng.gauss(mean, vol))
+        finals.append(bal)
+    finals.sort()
+    pick = lambda q: round(finals[min(trials - 1, int(q * trials))])  # noqa: E731
+    hits = sum(1 for b in finals if b >= target)
+    return {"successPct": round(hits / trials * 100.0, 1), "p10": pick(0.10), "p50": pick(0.50),
+            "p90": pick(0.90), "scenarios": scenarios, "trials": trials,
+            "volPct": round(vol * 100, 1)}
+

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: check the daily refresh's health every day and notify if it is broken.
+
+  Install:
+    1. Edit the two paths below if your project lives elsewhere.
+    2. cp scripts/com.nexusai.watchdog.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.nexusai.watchdog.plist
+  Verify:    launchctl list | grep nexusai
+  Run now:   launchctl start com.nexusai.watchdog
+  Uninstall: launchctl unload ~/Library/LaunchAgents/com.nexusai.watchdog.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nexusai.watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/.venv/bin/python3</string>
+    <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/watchdog.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI</string>
+
+  <!-- Fire every day at 10:00, well after the 07:30 refresh it watches -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>10</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/erichang/Desktop/Desktop - Eric's MacBook Air/NexusAI/scripts/watchdog.log</string>
+</dict>
+</plist>
