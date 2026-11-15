@@ -289,3 +289,110 @@ def test_unknown_yield_is_not_printed_as_zero():
                               "why": "bond/T-bill interest is taxed as ordinary income"}]}
     pc = text([OCT, NOV], days={"2026-11-01": {**hday(1, 1, 1), "analytics": an}}).split("PORTFOLIO CHECK")[1]
     assert "SGOV" in pc and "0.0% yield" not in pc
+
+
+# --- performance / cash flow / goals / contribution room ---------------------------------
+import cashflow as _cfw  # noqa: E402
+import contributions as _ct  # noqa: E402
+
+
+def _rows(spend=3000.0, income=5000.0, months=("2026-08", "2026-09", "2026-10")):
+    out = []
+    for m in months:
+        out.append({"id": f"s{m}", "account": "a", "date": f"{m}-10", "amount": spend, "name": "RENT",
+                    "merchant": "Landlord", "cat": "RENT_AND_UTILITIES", "detailed": "", "pending": False})
+        out.append({"id": f"i{m}", "account": "a", "date": f"{m}-01", "amount": -income, "name": "PAY",
+                    "merchant": "", "cat": "INCOME", "detailed": "", "pending": False})
+    return out
+
+
+def _money(**kw):
+    summary = _cfw.summary(_rows(), TODAY, assumed_annual_spend=80000.0)
+    base = {"cashFlow": summary, "budget": {}, "goals": [], "goalSummary": None,
+            "contributions": _ct.compute({}, year=2026, detected={"hsa": 3961.95, "401k": 13521.21})}
+    base.update(kw)
+    return base
+
+
+def test_performance_section_reports_twr_and_excludes_deposits():
+    t = text([OCT, NOV], days=DAYS)
+    p = t.split("PERFORMANCE")[1].split("COASTFIRE")[0]
+    assert "+5.0%" in p and "+$500" in p                # the 10 shares bought on Nov 1 are not a gain
+
+
+def test_performance_vs_spy_when_both_ends_have_spy():
+    days = {k: dict(v) for k, v in DAYS.items()}
+    days["2026-10-01"]["spy"] = 500.0
+    days["2026-11-01"]["spy"] = 510.0
+    p = text([OCT, NOV], days=days).split("PERFORMANCE")[1].split("COASTFIRE")[0]
+    assert "SPY" in p and "+2.0%" in p and "ahead by 3.0 points" in p      # 5.0% - 2.0%
+
+
+def test_performance_says_spy_unavailable_otherwise():
+    p = text([OCT, NOV], days=DAYS).split("PERFORMANCE")[1].split("COASTFIRE")[0]
+    assert "spy" in p.lower() and "not yet" in p.lower()
+
+
+def test_no_performance_section_without_daily_history():
+    assert "PERFORMANCE" not in text([OCT, NOV], days={})
+
+
+def test_cash_flow_section_has_last_month_averages_and_assumed_comparison():
+    t = text([OCT, NOV], money=_money())
+    c = t.split("CASH FLOW")[1].split("GOALS")[0].split("CONTRIBUTION ROOM")[0]
+    assert "$5,000" in c and "$3,000" in c and "40.0%" in c            # income, spending, savings rate
+    assert "Rent & utilities" in c
+    assert "below" in c and "$80,000" in c                             # real spend 36k vs 80k assumed
+
+
+def test_cash_flow_lists_only_over_budget_categories_from_last_month():
+    cmp_ = {"rows": [{"category": "RENT_AND_UTILITIES", "label": "Rent & utilities", "target": 2500.0,
+                      "actual": 3000.0, "over": True, "pctUsed": 120.0},
+                     {"category": "FOOD_AND_DRINK", "label": "Food & drink", "target": 600.0,
+                      "actual": 400.0, "over": False, "pctUsed": 66.7}], "unbudgeted": 0.0}
+    c = text([OCT, NOV], money=_money(budget=cmp_)).split("CASH FLOW")[1]
+    assert "Over budget" in c and "Rent & utilities" in c and "$500" in c
+    assert "Food & drink: " not in c
+
+
+def test_cash_flow_section_absent_without_transactions():
+    empty = _money(cashFlow=_cfw.summary([], TODAY))
+    assert "CASH FLOW" not in text([OCT, NOV], money=empty)
+
+
+def test_goals_section_progress_and_funding_verdict():
+    goals = [{"name": "House", "target": 60000.0, "date": "2028-06-01", "saved": 14227.0, "pct": 23.7,
+              "requiredMonthly": 2465.87, "status": "active", "remaining": 45773.0}]
+    summ = {"totalRequiredMonthly": 2465.87, "monthlySurplus": 1705.0, "fundable": False, "activeCount": 1}
+    g = text([OCT, NOV], money=_money(goals=goals, goalSummary=summ)).split("GOALS")[1].split("CONTRIBUTION ROOM")[0]
+    assert "House" in g and "23.7%" in g and "$2,466" in g and "not enough" in g.lower()
+
+
+def test_contribution_room_shows_remaining_and_flags_the_employer_caveat():
+    c = text([OCT, NOV], money=_money()).split("CONTRIBUTION ROOM")[1]
+    assert "HSA" in c and "$3,962" in c and "$438" in c
+    assert "employer" in c.lower()
+
+
+def test_report_without_money_block_is_unchanged_in_shape():
+    t = text([OCT, NOV])
+    assert "CASH FLOW" not in t and "GOALS" not in t and "CONTRIBUTION ROOM" not in t
+
+
+def test_plain_text_no_markdown_with_money_sections():
+    t = text([OCT, NOV], days=DAYS_AN, money=_money())
+    assert "**" not in t and "##" not in t and "|" not in t
+
+
+def test_cash_flow_reports_money_moved_to_investments_and_warns_when_it_exceeds_income():
+    rows = []
+    for m in ("2026-08", "2026-09", "2026-10"):
+        rows += [{"id": f"s{m}", "account": "a", "date": f"{m}-10", "amount": 1000.0, "name": "X", "merchant": "",
+                  "cat": "FOOD_AND_DRINK", "detailed": "", "pending": False},
+                 {"id": f"i{m}", "account": "a", "date": f"{m}-01", "amount": -2000.0, "name": "PAY", "merchant": "",
+                  "cat": "INCOME", "detailed": "", "pending": False},
+                 {"id": f"v{m}", "account": "a", "date": f"{m}-03", "amount": 5000.0, "name": "WEBULL", "merchant": "",
+                  "cat": "TRANSFER_OUT", "detailed": "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS", "pending": False}]
+    c = text([OCT, NOV], money=_money(cashFlow=_cfw.summary(rows, TODAY))).split("CASH FLOW")[1].split("GOALS")[0]
+    assert "moved to investments" in c.lower() and "$5,000" in c
+    assert "other income" in c.lower()                      # the savings rate is flagged as understated

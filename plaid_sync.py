@@ -92,24 +92,56 @@ def _map_type(subtype: str, atype: str) -> str:
 _SKIP_SUBTYPES = {"hsa"}
 
 
+_LIABILITY_TYPES = {"Credit Card", "Mortgage", "Auto Loan", "Student Loan", "Other Liability"}
+
+
+def _balance_amount(bal: dict, ui_type: str) -> float:
+    """The balance to record. `current` is the amount held (assets) or OWED
+    (credit/loans); `available` is spendable cash for a bank account and the
+    UNUSED CREDIT for a card. `current or available` used to turn a $0.00 card
+    into a ~$20,000 phantom debt, so: current whenever Plaid sent one (zero
+    included); available only for non-liability accounts with no current; a
+    liability never falls back and never goes negative (an overpaid card is a
+    credit in your favour, not a debt)."""
+    current = bal.get("current")
+    if ui_type in _LIABILITY_TYPES:
+        return max(0.0, float(current)) if current is not None else 0.0
+    if current is not None:
+        return abs(float(current))
+    return abs(float(bal.get("available") or 0))
+
+
+def _distinct_names(rows: list, masks: list) -> None:
+    """Several cards can all be called "CREDIT CARD"; name collisions would make
+    them overwrite each other wherever balances are keyed by name. Duplicates get
+    their last four digits (or a position if Plaid sent none) appended."""
+    counts: dict = {}
+    for r in rows:
+        counts[r["name"]] = counts.get(r["name"], 0) + 1
+    for i, (r, mask) in enumerate(zip(rows, masks)):
+        if counts[r["name"]] > 1:
+            r["name"] = f"{r['name']} ••{mask}" if mask else f"{r['name']} #{i + 1}"
+
+
 def _fetch_one(client, access_token: str, today: str) -> list:
     from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
     resp = client.accounts_balance_get(AccountsBalanceGetRequest(access_token=access_token))
-    rows = []
+    rows, masks = [], []
     for a in resp["accounts"]:
         if str(a.get("subtype", "")).lower() in _SKIP_SUBTYPES:
             continue
-        bal = a["balances"]
-        amount = bal.get("current") or bal.get("available") or 0
+        ui_type = _map_type(str(a.get("subtype")), str(a.get("type")))
         rows.append({
             "name": a.get("name") or a.get("official_name") or "Account",
-            "type": _map_type(str(a.get("subtype")), str(a.get("type"))),
-            "balance": abs(float(amount)),
+            "type": ui_type,
+            "balance": _balance_amount(a["balances"], ui_type),
             "notes": "Synced via Plaid",
             "updated": today,
             "source": "plaid",
             "plaid_account_id": a.get("account_id"),
         })
+        masks.append(a.get("mask"))
+    _distinct_names(rows, masks)
     return rows
 
 
@@ -313,3 +345,167 @@ def pull_investment_holdings() -> dict:
         return result
     except Exception as e:
         return {"ok": False, "reason": f"Plaid error: {type(e).__name__}: {e}"}
+
+
+# Plaid errors meaning "this Item has no transactions product / consent (yet)".
+# Expected for Items linked with only `investments`, so they are skipped, not failures.
+_TX_SKIP_CODES = ("ADDITIONAL_CONSENT_REQUIRED", "INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED",
+                  "PRODUCT_NOT_READY")
+
+
+def _make_client():
+    from plaid.api import plaid_api
+    from plaid import Configuration, ApiClient
+    hosts = {
+        "sandbox": "https://sandbox.plaid.com",
+        "development": "https://development.plaid.com",
+        "production": "https://production.plaid.com",
+    }
+    cfg = Configuration(host=hosts.get(PLAID_ENV, hosts["production"]),
+                        api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET})
+    return plaid_api.PlaidApi(ApiClient(cfg))
+
+
+def _error_code(e: Exception) -> str:
+    """Plaid error_code if the exception carries one, else the exception type.
+    Deliberately drops the rest of the message (request bodies/headers)."""
+    import re
+    m = re.search(r'"?error_code"?\s*[:=]\s*"?([A-Z_]{4,})', str(e))
+    return m.group(1) if m else type(e).__name__
+
+
+def pull_transactions() -> dict:
+    """Incrementally sync transactions for every linked Item into transactions.json.
+
+    Items without transactions consent are skipped (listed under `skipped`).
+    A real error on one Item (login required, malformed data) is reported under
+    `errors` and makes ok False, but the other Items still sync. Nothing is
+    stored for a failing Item and its cursor does not advance, so the next run
+    simply retries. Returns {"ok", "items_synced", "added", "skipped", "errors"}.
+    """
+    import transactions as tx
+    if not HAS_PLAID:
+        return {"ok": False, "reason": "Plaid not configured"}
+    try:
+        from plaid.model.transactions_sync_request import TransactionsSyncRequest
+        client = _make_client()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"Plaid unavailable: {_error_code(e)}"}
+
+    synced = added_total = 0
+    skipped, errors = [], []
+    for token in PLAID_ACCESS_TOKENS:
+        key = tx.item_key(token)
+
+        def sync(cursor, token=token):
+            kwargs = {"access_token": token, "count": 500}
+            if cursor:
+                kwargs["cursor"] = cursor
+            return tx.to_plain(client.transactions_sync(TransactionsSyncRequest(**kwargs)))
+
+        try:
+            added, modified, removed, cursor = tx.fetch_all(sync, tx.get_cursor(key))
+            tx.apply_sync(key, added, modified, removed, cursor)
+            synced += 1
+            added_total += len(added)
+        except tx.NotReady:
+            skipped.append(f"item {key}: not ready yet (Plaid is still preparing history)")
+        except tx.TransactionsError as e:
+            errors.append(f"item {key}: {e}")
+        except Exception as e:  # noqa: BLE001
+            code = _error_code(e)
+            if code in _TX_SKIP_CODES:
+                skipped.append(f"item {key}: {code}")
+            else:
+                errors.append(f"item {key}: {code}")
+    result = {"ok": not errors, "items_synced": synced, "added": added_total,
+              "skipped": skipped, "errors": errors}
+    if errors:
+        result["reason"] = f"{len(errors)} item(s) failed: " + "; ".join(errors)
+    return result
+
+
+_LINKABLE_PRODUCTS = {"transactions", "investments", "liabilities"}
+
+
+def link_request_kwargs(update_index: int | None = None, products=("investments",),
+                        tokens: list | None = None) -> dict:
+    """Arguments for Plaid's link_token_create, as plain strings (scripts/plaid_link.py
+    wraps them in Plaid's model classes). New link: `products`. Update mode
+    (update_index given): reopen an EXISTING Item so the user can grant extra
+    consent, e.g. `transactions` on an Item first linked for investments only;
+    the access token does not change."""
+    products = list(products or [])
+    if not products or any(p not in _LINKABLE_PRODUCTS for p in products):
+        raise ValueError(f"products must be a non-empty subset of {sorted(_LINKABLE_PRODUCTS)}")
+    if update_index is None:
+        return {"products": products}
+    tokens = tokens or []
+    if not 0 <= update_index < len(tokens):
+        raise ValueError(f"no linked Item at index {update_index} ({len(tokens)} configured)")
+    return {"access_token": tokens[update_index], "additional_consented_products": products}
+
+
+def pull_investment_activity() -> dict:
+    """Rebuild investment_flows.json (contributions / dividends / withdrawals per
+    401k / HSA / IRA) from Plaid investment transactions, last 24 months.
+
+    Rebuilt from scratch each time, so it is only written when every
+    investment-capable Item succeeded: a half-failed pull must not replace a
+    complete picture. Items without the investments product are skipped."""
+    import investment_flows as fl
+    import transactions as tx
+    if not HAS_PLAID:
+        return {"ok": False, "reason": "Plaid not configured"}
+    try:
+        from plaid.model.accounts_get_request import AccountsGetRequest
+        from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
+        from plaid.model.investments_transactions_get_request_options import \
+            InvestmentsTransactionsGetRequestOptions
+        client = _make_client()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"Plaid unavailable: {_error_code(e)}"}
+
+    end = datetime.date.today()
+    start = end - datetime.timedelta(days=730)
+    all_txs: list = []
+    subtypes: dict = {}
+    synced = 0
+    skipped, errors = [], []
+    for token in PLAID_ACCESS_TOKENS:
+        key = tx.item_key(token)
+        try:
+            accts = client.accounts_get(AccountsGetRequest(access_token=token))["accounts"]
+            subtypes.update({a["account_id"]: str(a.get("subtype") or "") for a in accts})
+
+            def page(offset, token=token):
+                resp = client.investments_transactions_get(InvestmentsTransactionsGetRequest(
+                    access_token=token, start_date=start, end_date=end,
+                    options=InvestmentsTransactionsGetRequestOptions(count=500, offset=offset)))
+                return (tx.to_plain(resp["investment_transactions"]),
+                        int(resp["total_investment_transactions"]))
+
+            all_txs.extend(fl.fetch_all_pages(page))
+            synced += 1
+        except fl.FlowsError as e:
+            errors.append(f"item {key}: {e}")
+        except Exception as e:  # noqa: BLE001
+            code = _error_code(e)
+            if code in _TX_SKIP_CODES:
+                skipped.append(f"item {key}: {code}")
+            else:
+                errors.append(f"item {key}: {code}")
+
+    result = {"ok": not errors, "items_synced": synced, "skipped": skipped, "errors": errors,
+              "transactions": len(all_txs)}
+    if errors:
+        result["reason"] = f"{len(errors)} item(s) failed: " + "; ".join(errors)
+        return result
+    if synced:
+        try:
+            flows = fl.aggregate(all_txs, subtypes)
+        except fl.FlowsError as e:
+            return {**result, "ok": False, "reason": str(e), "errors": [str(e)]}
+        flows["synced_at"] = end.isoformat()
+        fl.save(flows)
+    return result

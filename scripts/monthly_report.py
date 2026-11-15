@@ -23,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import attribution  # noqa: E402
+import performance  # noqa: E402
 
 STALE_MANUAL_DAYS = 35   # manual accounts are refreshed monthly
 STALE_PLAID_DAYS = 3     # Plaid syncs daily; older means the sync is failing
@@ -80,7 +81,8 @@ def _why_it_moved(days, prev, cur):
             "partial": (got - asked).days > 3, "asked_start": start}
 
 
-def build_report(snapshots, accounts, files, today, days=None, scorecard=None, problems=None):
+def build_report(snapshots, accounts, files, today, days=None, scorecard=None, problems=None,
+                 money=None):
     """snapshots: nw_history list (any order); accounts: accounts.json rows;
     files: {label: date the file was last written}; days: daily_history days
     (for 'why it moved' and the portfolio check); scorecard: parsed
@@ -99,6 +101,15 @@ def build_report(snapshots, accounts, files, today, days=None, scorecard=None, p
         rep["analytics"] = days[latest].get("analytics")
     rep["scorecard"] = scorecard
     rep["problems"] = problems or []
+    rep["money"] = money
+    rep["perf"] = None
+    if days and prev:
+        start = prev.get("recordedAt") or prev["date"]
+        end = cur.get("recordedAt") or cur["date"]
+        total = performance.twr(days, start, end)
+        if total:
+            rep["perf"] = {"total": total, "byAccount": performance.per_account(days, start, end),
+                           "vsSpy": performance.vs_benchmark(days, start, end)}
 
     # Per-account movement (only when both months stored a breakdown).
     ca = (cur.get("details") or {}).get("accounts")
@@ -224,6 +235,107 @@ def _render_scorecard(sc):
     return L
 
 
+def _render_performance(perf):
+    t = perf["total"]
+    L = [f"PERFORMANCE  ({_fmt_day(t['from'])} - {_fmt_day(t['to'])})",
+         f"  Your investments returned {t['returnPct']:+.1f}% ({money(t['marketGain'], True)} from market "
+         f"moves; deposits and new shares are not counted as gains)."]
+    v = perf["vsSpy"]
+    if v and v["covered"]:
+        L.append(f"  SPY over {_fmt_day(v['from'])} - {_fmt_day(v['to'])}: {v['spyPct']:+.1f}%, so you were "
+                 f"{'ahead' if v['excessPct'] >= 0 else 'behind'} by {abs(v['excessPct']):.1f} points "
+                 f"(you: {v['portfolioPct']:+.1f}%).")
+    else:
+        L.append("  SPY comparison is not yet available: it needs two days that carry a SPY price, "
+                 "which began recently.")
+    if perf["byAccount"]:
+        L.append("  By account: " + ", ".join(f"{n} {r['returnPct']:+.1f}%" for n, r in perf["byAccount"].items()) + ".")
+    L.append("  Holdings only (Webull, Roth, HSA funds); the 401(k) is one balance, so it isn't included.")
+    return L
+
+
+def _render_cash_flow(m):
+    cf = m.get("cashFlow") or {}
+    last = cf.get("lastMonth")
+    if not last:
+        return []
+    L = ["CASH FLOW"]
+    mname = datetime.date.fromisoformat(last["month"] + "-01").strftime("%B")
+    rate = f" (savings rate {last['savingsRate']:.1f}% of take-home)" if last.get("savingsRate") is not None else ""
+    L.append(f"  {mname}: income {money(last['income'])}, spending {money(last['spending'])}, "
+             f"left over {money(last['net'], True)}{rate}.")
+    if cf.get("avgMonthlySpend") is not None:
+        L.append(f"  Average of the last {cf['completeMonths']} full month{'s' if cf['completeMonths'] != 1 else ''}: "
+                 f"spending {money(cf['avgMonthlySpend'])}/mo, income {money(cf['avgMonthlyIncome'])}/mo, "
+                 f"left over {money(cf['avgMonthlySurplus'], True)}/mo.")
+    if cf.get("avgMonthlyInvested"):
+        L.append(f"  Moved to investments: {money(last['invested'])} in {mname} "
+                 f"(about {money(cf['avgMonthlyInvested'])}/mo on average).")
+        if cf.get("investedExceedsIncome"):
+            L.append("  That is more than the income these accounts see, so other income (transfers or deposits from "
+                     "accounts that aren't linked) is funding it and the savings rate above understates what you save.")
+    if cf.get("topCategories"):
+        L.append("  Biggest categories (3 months): " +
+                 ", ".join(f"{c['label']} {money(c['amount'])}" for c in cf["topCategories"][:4]) + ".")
+    over = [r for r in (m.get("budget") or {}).get("rows", []) if r.get("over")]
+    if over:
+        L.append(f"  Over budget in {mname}: " + "; ".join(
+            f"{r['label']} {money(r['actual'])} vs {money(r['target'])} ({money(r['actual'] - r['target'], True)})"
+            for r in over) + ".")
+    if cf.get("assumedAnnualSpend") and cf.get("spendVsAssumedPct") is not None:
+        pct_ = cf["spendVsAssumedPct"]
+        L.append(f"  Your real spending is {abs(pct_):.0f}% {'below' if pct_ <= 0 else 'above'} the "
+                 f"{money(cf['assumedAnnualSpend'])}/yr in your plan; at actual spend the 25x FIRE number is "
+                 f"{money(cf['fireNumberAtActual'])} instead of {money(cf['assumedAnnualSpend'] * 25)}.")
+    if cf.get("shortHistory"):
+        L.append("  (Fewer than 3 full months of data so far, so averages may shift.)")
+    L.append("  Savings rate counts take-home pay; 401(k) payroll deferrals never reach your bank account.")
+    return L
+
+
+def _render_goals(m):
+    goals = m.get("goals") or []
+    if not goals:
+        return []
+    L = ["GOALS"]
+    for g in goals:
+        need = (f"; set aside {money(g['requiredMonthly'])}/mo to hit {g['date']}"
+                if g.get("status") == "active" and g.get("requiredMonthly") is not None else "")
+        state = {"done": " (reached)", "overdue": " (past its date)"}.get(g.get("status"), "")
+        L.append(f"  {g['name']}: {g['pct']:.1f}% of {money(g['target'])}, {money(g['saved'])} saved{need}{state}.")
+    s = m.get("goalSummary") or {}
+    if s.get("fundable") is False:
+        L.append(f"  Not enough left over each month: these goals need {money(s['totalRequiredMonthly'])}/mo "
+                 f"but you have about {money(s['monthlySurplus'])}/mo.")
+    elif s.get("fundable") is True and s.get("activeCount"):
+        L.append(f"  Your left-over cash (about {money(s['monthlySurplus'])}/mo) covers the "
+                 f"{money(s['totalRequiredMonthly'])}/mo these goals need.")
+    return L
+
+
+def _render_contribution_room(m):
+    c = m.get("contributions") or {}
+    if not c:
+        return []
+    first = next(iter(c.values()))
+    L = [f"CONTRIBUTION ROOM  ({first['limitsYear']} IRS limits{', latest known' if first['limitsEstimated'] else ''})"]
+    employer = False
+    for key in ("401k", "hsa", "roth"):
+        x = c.get(key)
+        if not x:
+            continue
+        if x["source"] == "none":
+            L.append(f"  {x['label']}: no contributions detected (limit {money(x['limit'])}).")
+            continue
+        status = "maxed out" if x["maxed"] else f"{money(x['room'])} left"
+        L.append(f"  {x['label']}: {money(x['ytd'])} of {money(x['limit'])} so far this year, {status}.")
+        employer = employer or x.get("mayIncludeEmployer", False)
+    if employer:
+        L.append("  The 401(k) figure may include employer match, which doesn't count toward your own limit; "
+                 "the HSA limit does include employer contributions.")
+    return L
+
+
 def render_text(rep):
     if rep["empty"]:
         return "NexusAI monthly report\n\nNo net worth history recorded yet."
@@ -259,6 +371,11 @@ def render_text(rep):
         L.extend(_render_why(why))
         L.append("")
 
+    # Performance
+    if rep.get("perf"):
+        L.extend(_render_performance(rep["perf"]))
+        L.append("")
+
     # CoastFIRE
     coast = (cur.get("details") or {}).get("coast")
     L.append("COASTFIRE PROGRESS")
@@ -284,6 +401,13 @@ def render_text(rep):
     else:
         L.append("  Not recorded for this month.")
     L.append("")
+
+    # Money: cash flow, goals, contribution room
+    for block in (_render_cash_flow, _render_goals, _render_contribution_room):
+        lines = block(rep["money"]) if rep.get("money") else []
+        if lines:
+            L.extend(lines)
+            L.append("")
 
     # Per-account
     ch = rep.get("account_changes")
@@ -343,6 +467,31 @@ def _load_scorecard(root):
         return None
 
 
+def gather_money(root, today, days):
+    """Cash flow, budget, goals and contribution room, from stored files only."""
+    import budget as budget_mod
+    import cashflow
+    import contributions
+    import goals as goals_mod
+    import investment_flows
+    import profile as pr
+    import transactions
+    prof = pr.load_profile(os.path.join(root, "profile.json"))
+    assumed = float(prof.get("coastfire_annual_spend", 0) or 0) or None
+    cf = cashflow.summary(list(transactions.load()["txns"].values()), today, cashflow.load_rules(), assumed)
+    cmp_ = (budget_mod.compare(prof["budget"], cf["lastMonth"]["byCategory"])
+            if prof.get("budget") and cf.get("lastMonth") else {})
+    balances = {}
+    if days:
+        latest = max(d for d in days if days[d].get("bal")) if any(v.get("bal") for v in days.values()) else None
+        balances = days[latest]["bal"] if latest else {}
+    rows = goals_mod.progress(prof.get("savings_goals", []), balances, today)
+    detected = investment_flows.limit_ytd(investment_flows.load(), today.year)
+    return {"cashFlow": cf, "budget": cmp_, "goals": rows,
+            "goalSummary": goals_mod.summary(rows, cf.get("avgMonthlySurplus")) if rows else None,
+            "contributions": contributions.compute(prof, year=today.year, detected=detected)}
+
+
 def main():
     import accounts as ac
     import daily_history
@@ -354,7 +503,7 @@ def main():
                                datetime.datetime.now())
     rep = build_report(nw_snapshots.load_history(), accts, _file_dates(ROOT), today,
                        days=daily_history.load_days(), scorecard=_load_scorecard(ROOT),
-                       problems=problems)
+                       problems=problems, money=gather_money(ROOT, today, daily_history.load_days()))
     body = render_text(rep)
     out_dir = os.path.join(ROOT, "reports")
     os.makedirs(out_dir, exist_ok=True)

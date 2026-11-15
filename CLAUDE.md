@@ -68,14 +68,17 @@ install the launchd plists (see Gotchas).
   of the held tickers and compares the next 1/3-month return with SPY; writes `reports/scorecard.txt`
   and `.json`. Network. Finding as of Oct 2026: no edge over the baseline. The monthly task refreshes it.
 - **`scripts/plaid_link.py`** — one-time local tool to link one institution via
-  Plaid Link and print its access token (run once per institution).
+  Plaid Link and print its access token (run once per institution). Flags: `--products
+  transactions,investments` for a new link; `--update N --products transactions` reopens the Nth
+  token in `PLAID_ACCESS_TOKENS` (0-based; 0 = Fidelity, 1 = Chase) so the user can grant
+  transactions consent without a new token. The user does the login in Plaid's own window.
 - **`scripts/install-hooks.sh`** — installs the pre-commit guard (blocks
   committing `.env`, data files, or hardcoded key-shaped strings).
 
 ## Commands
 - Run server: `./scripts/run_server.sh` → http://localhost:5001
 - Run legacy Streamlit UI: `./run.sh` → http://localhost:8502
-- Test: `.venv/bin/python3 -m pytest tests/ -q` — 159 passed. `pytest` is not in
+- Test: `.venv/bin/python3 -m pytest tests/ -q` — 362 passed. `pytest` is not in
   `requirements.txt`; install it. The suite is hermetic: a session fixture
   redirects the price/period/risk caches and `nw_history.json` to a temp dir,
   and Plaid is forced to "unconfigured". yfinance stderr noise for fake tickers
@@ -125,6 +128,19 @@ install the launchd plists (see Gotchas).
 - `coastfire.odds()` — seeded Monte Carlo (zero further contributions): success %, p10/p50/p90 at
   retirement, low/base/high return scenarios. `compute()["odds"]` uses a fixed seed so monthly numbers
   only move when inputs do; stored in each snapshot's `details.coast`.
+- **Money features** (all pure modules + stored JSON, all gitignored, all owner-only files):
+  `transactions.py` (validated store for Plaid `/transactions/sync`; cursor only advances after a whole
+  sync applied), `cashflow.py` (income / spending / savings rate; transfers, card payments and pending rows
+  excluded; user rules in `category_rules.json`), `investment_flows.py` (401k/HSA/IRA contributions and
+  dividends rebuilt from Plaid investment transactions -> auto YTD for `contributions.py`),
+  `performance.py` (time-weighted return from `daily_history.json`; deposits never count as gains; SPY
+  comparison only from days that carry a `spy` price, i.e. from 2026-11-14), `goals.py`, `budget.py`,
+  `scenarios.py` (what-if planner), `datastore_backup.py` (nightly copy to `backups/daily/`, 30 days,
+  never `.env`). Goals and budget live in `profile.json` (`savings_goals`, `budget`).
+- Dashboard: `design_handoff_nexusai/design/sections-4.js` holds the Cash Flow page, goals, budget,
+  what-if, performance, portfolio check, why-it-moved, health banner. New payload blocks must also be
+  added to `/api/snapshot` AND the key list in `applySnapshotData` (index.html) or they won't refresh
+  after a save. Everything from Plaid/the user is escaped (`esc()`) before `innerHTML`.
 - `scripts/import_holdings.py` / `scripts/apply_snapshot.py` — brokerage
   CSV import pipeline (drop exports in `imports/`).
 - `config.py` — central env-driven config/thresholds; loads `.env` via
@@ -153,6 +169,19 @@ install the launchd plists (see Gotchas).
   silently excludes them; `401k Cash`/`IRA Cash` mean just a cash sleeve.
   Proprietary plan fund codes (e.g. `NON40*`) can't be priced by yfinance —
   track those as a lump-sum `Retirement` account, not as holdings.
+- **Net worth subtracts debts.** Debt rows carry negative balances; `server._net_worth()` sums everything.
+  (It used to skip debts entirely.) Emergency-fund cash is `server._liquid_cash()`: Cash, HYSA, Checking,
+  Savings, Money Market, CD (it used to count only Cash/HYSA, so checking showed as $0).
+- **Profile fields are whitelisted.** `profile._coerce()` rebuilds the dict from known fields; a new
+  profile field that isn't added there is silently dropped on save.
+- **Transactions need consent first.** Until the user runs the `--update 1 --products transactions` link,
+  `pull_transactions()` reports both Items as skipped (`ADDITIONAL_CONSENT_REQUIRED`), which is ok, and
+  the Cash Flow page shows setup instructions. Credit cards are not on the existing Chase Item.
+- **Plaid failures now fail the step.** `daily_refresh._require_ok()` turns `{"ok": False}` and
+  `partial_errors` into a failed step, so health.json and the watchdog see them.
+- **Fresh-process builds look wrong.** `python -c "import server; server.build_nexus_data()"` has an empty
+  price cache and values holdings at cost (net worth ~$30k low). It is not saved (records are marked
+  incomplete), but don't quote its numbers.
 - **Daily-job health.** `scripts/daily_refresh.py` exits 1 and writes `health.json` when any step fails,
   but keeps going so prices and the snapshot still happen. Check `launchctl print gui/$(id -u)/com.nexusai.watchdog`
   and `reports/alerts.log` (not just `daily_refresh.log`) to see whether anything has been flagged.
@@ -176,6 +205,7 @@ install the launchd plists (see Gotchas).
   `scripts/com.nexusai.watchdog.plist`
   — live launchd schedules; edits require re-running `launchctl unload`/`load`.
 - `portfolio.json`, `accounts.json`, `profile.json`, `*_holdings.csv`,
-  `nw_history.json`, `daily_history.json`, `health.json`, `alert_state.json`, `*_cache.json` — real financial data, gitignored.
+  `nw_history.json`, `daily_history.json`, `transactions.json`, `investment_flows.json`,
+  `category_rules.json`, `health.json`, `alert_state.json`, `backups/`, `*_cache.json` — real financial data, gitignored.
 - `.env` — holds Plaid credentials and API keys; keep it `chmod 600`, never
   commit (the pre-commit hook blocks it).

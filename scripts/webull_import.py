@@ -110,7 +110,9 @@ def _backup(root, paths):
     for p in paths:
         if os.path.exists(p):
             shutil.copy2(p, dest)
-    keep = sorted(os.listdir(os.path.join(root, "backups")))
+    # Only timestamped Webull backups are pruned here (the nightly job keeps its
+    # own rotation in backups/daily/).
+    keep = sorted(d for d in os.listdir(os.path.join(root, "backups")) if d[:4].isdigit())
     for old in keep[:-KEEP_BACKUPS]:
         shutil.rmtree(os.path.join(root, "backups", old), ignore_errors=True)
     return dest

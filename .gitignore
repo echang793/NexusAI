@@ -39,6 +39,9 @@ period_cache.json
 risk_cache.json
 nw_history.json
 daily_history.json
+transactions.json
+investment_flows.json
+category_rules.json
 health.json
 alert_state.json
 .odds_cache/

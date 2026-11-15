@@ -1,18 +1,27 @@
 """Emergency-fund coverage + rough net-worth-by-age percentile context."""
 
 
-def emergency_fund(profile: dict, cash_total: float) -> dict:
+def emergency_fund(profile: dict, cash_total: float, actual_monthly: float | None = None) -> dict:
+    """Months of expenses the cash covers. `monthlyExpense` is the ASSUMED figure
+    (profile monthly_expense, else the CoastFIRE spend / 12). When transactions
+    give a real average, it is reported beside it (`...Actual`), never in place of it."""
     monthly = float(profile.get("monthly_expense", 0) or 0)
     if not monthly:
         annual_spend = float(profile.get("coastfire_annual_spend", 0) or 0)
         monthly = annual_spend / 12.0
     months = (cash_total / monthly) if monthly else None
-    return {
+    out = {
         "cashTotal": round(cash_total, 2),
         "monthlyExpense": round(monthly, 2),
         "monthsCovered": round(months, 1) if months is not None else None,
         "healthy": months is not None and months >= 3,
     }
+    if actual_monthly:
+        actual_months = cash_total / actual_monthly
+        out.update(monthlyExpenseActual=round(actual_monthly, 2),
+                   monthsCoveredActual=round(actual_months, 1),
+                   healthyActual=actual_months >= 3)
+    return out
 
 
 # Rough US net-worth-by-age percentile brackets — approximate, aggregated

@@ -36,7 +36,10 @@
     const topGainers = movers.slice(0, 3);
     const topLosers = movers.slice(-3).reverse();
 
+    const sgn = (n) => (n > 0 ? "+" : "");
+    const col = (n) => (n >= 0 ? "var(--green)" : "var(--red)");
     return `
+      ${AppleSections.overviewTop ? AppleSections.overviewTop() : ""}
       <div class="grid g-overview">
         <!-- LEFT: Net Worth hero -->
         <div class="card hero">
@@ -47,8 +50,8 @@
           </div>
           <div class="hero-controls">
             <div class="hero-delta">
-              <span class="delta up">${Icon("trending_up", 12)} ${fmt$(delta, { signed: true, compact: true })} all-time</span>
-              <span class="hero-since">YTD <span style="color:var(--green); font-weight:600">+${ytdPct.toFixed(1)}%</span></span>
+              <span class="delta ${delta >= 0 ? "up" : "down"}">${Icon(delta >= 0 ? "trending_up" : "arrow_down", 12)} ${fmt$(delta, { signed: true, compact: true })} all-time</span>
+              <span class="hero-since">YTD <span style="color:${col(ytdPct)}; font-weight:600">${sgn(ytdPct)}${ytdPct.toFixed(1)}%</span></span>
             </div>
             <div class="flex gap-s">
               <div class="range-pills" id="ow-granularity">
@@ -124,6 +127,8 @@
           </div>
         </div>
       </div>
+
+      ${AppleSections.overviewMid ? AppleSections.overviewMid() : ""}
 
       <!-- CoastFIRE -->
       <div class="card mt-m" id="cf-card-wrap">${coastFireCard(D.coastFire)}</div>
@@ -277,6 +282,7 @@
 
   function hydrateOverview() {
     const hist = D.netWorthHistory;
+    if (AppleSections.hydrateOverviewMoney) AppleSections.hydrateOverviewMoney();
     // animate bars
     requestAnimationFrame(() => {
       document.querySelectorAll("[data-w]").forEach(el => {

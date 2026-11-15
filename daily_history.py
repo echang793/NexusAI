@@ -43,13 +43,14 @@ def load_days() -> dict:
 
 def _save(days: dict) -> None:
     tmp = HISTORY_FILE + ".tmp"
-    with open(tmp, "w") as f:
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
         json.dump({"days": days}, f, separators=(",", ":"), allow_nan=False)
     os.replace(tmp, HISTORY_FILE)
 
 
 def record_day(day: str, net_worth: float, accounts: dict, positions: list,
-               complete: bool = True, analytics: dict | None = None) -> None:
+               complete: bool = True, analytics: dict | None = None,
+               benchmark: float | None = None, balances: dict | None = None) -> None:
     """Store `day` (YYYY-MM-DD).
 
     accounts: {name: balance} for the non-ticker accounts (cash, Plaid
@@ -83,6 +84,18 @@ def record_day(day: str, net_worth: float, accounts: dict, positions: list,
                  "holdings": holdings, "complete": bool(complete)}
     if analytics:
         days[day]["analytics"] = analytics
+    # `at` marks when the prices were taken: they are as of the last build that
+    # day, and SPY comes from the same cache moment so the two stay comparable.
+    days[day]["at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    if balances:
+        # Every account balance by name (ticker-backed cards included): lets
+        # goals and the monthly report read balances without recomputing prices.
+        bal = {n: round(v) for n, v in ((n, _clean(b)) for n, b in balances.items()) if v is not None}
+        if bal:
+            days[day]["bal"] = bal
+    spy = _clean(benchmark)
+    if spy is not None and spy > 0:
+        days[day]["spy"] = round(spy, 4)
 
     if len(days) > KEEP_DAYS:
         for old in sorted(days)[:len(days) - KEEP_DAYS]:
@@ -90,6 +103,7 @@ def record_day(day: str, net_worth: float, accounts: dict, positions: list,
     _save(days)
 
 
-def record_today(net_worth, accounts, positions, complete=True, analytics=None) -> None:
+def record_today(net_worth, accounts, positions, complete=True, analytics=None,
+                 benchmark=None, balances=None) -> None:
     record_day(datetime.date.today().isoformat(), net_worth, accounts, positions, complete,
-               analytics)
+               analytics, benchmark, balances)

@@ -29,6 +29,8 @@
       <button class="nav-item" data-section="portfolio"><span class="nav-icon" id="ni-portfolio"></span>Portfolio<span class="nav-badge" id="badge-portfolio">44</span></button>
       <button class="nav-item" data-section="watchlist"><span class="nav-icon" id="ni-watchlist"></span>Watchlist<span class="nav-badge" id="badge-watchlist">6</span></button>
       <button class="nav-item" data-section="planning"><span class="nav-icon" id="ni-planning"></span>Planning</button>
+      <div class="nav-section">Money</div>
+      <button class="nav-item" data-section="cashflow"><span class="nav-icon" id="ni-cashflow"></span>Cash Flow</button>
       <div class="nav-section">AI</div>
       <button class="nav-item" data-section="advisor"><span class="nav-icon" id="ni-advisor"></span>Advisor<span class="nav-badge" style="background:linear-gradient(135deg, #0a84ff, #b14aff); color:white;">new</span></button>
     </nav>
@@ -69,6 +71,7 @@
       <div id="section-portfolio" class="section"></div>
       <div id="section-watchlist" class="section"></div>
       <div id="section-planning" class="section"></div>
+      <div id="section-cashflow" class="section"></div>
       <div id="section-advisor" class="section"></div>
     </div>
   </main>
@@ -245,6 +248,7 @@
 <script src="sections-1.js"></script>
 <script src="sections-2.js"></script>
 <script src="sections-3.js"></script>
+<script src="sections-4.js"></script>
 <script src="command.js"></script>
 <script src="animations.js"></script>
 <script src="sleek.js"></script>
@@ -255,7 +259,7 @@
   // Set nav icons
   const icons = {
     "ni-overview": "home", "ni-analyze": "chart", "ni-portfolio": "wallet",
-    "ni-watchlist": "eye", "ni-planning": "target", "ni-advisor": "sparkles",
+    "ni-watchlist": "eye", "ni-planning": "target", "ni-advisor": "sparkles", "ni-cashflow": "coin",
     "search-icon": "search", "bell-btn": "bell", "settings-btn": "settings",
     "tt-light": "sun", "tt-dark": "moon",
   };
@@ -281,13 +285,14 @@
   // Render each section's HTML
   const titles = {
     overview: "Overview", analyze: "Analyze", portfolio: "Portfolio",
-    watchlist: "Watchlist", planning: "Planning", advisor: "Advisor",
+    watchlist: "Watchlist", planning: "Planning", cashflow: "Cash Flow", advisor: "Advisor",
   };
   document.getElementById("section-overview").innerHTML = AppleSections.renderOverview();
   document.getElementById("section-analyze").innerHTML = AppleSections.renderAnalyze();
   document.getElementById("section-portfolio").innerHTML = AppleSections.renderPortfolio();
   document.getElementById("section-watchlist").innerHTML = AppleSections.renderWatchlist();
   document.getElementById("section-planning").innerHTML = AppleSections.renderPlanning();
+  document.getElementById("section-cashflow").innerHTML = AppleSections.renderCashflow();
   document.getElementById("section-advisor").innerHTML = AppleSections.renderAdvisor();
 
   // Update portfolio badge
@@ -362,7 +367,10 @@
     if (s.emergencyFund) D.emergencyFund = s.emergencyFund;
     if (s.netWorthPercentile) D.netWorthPercentile = s.netWorthPercentile;
     if (s.insights) D.insights = s.insights;
-    ["overview","portfolio","watchlist","planning","advisor"].forEach(sec => {
+    // Blocks added for the money views (cash flow, goals, budget, performance...)
+    ["cashFlow","categoryRules","goals","budget","performance","investmentFlows","whyItMoved",
+     "dailyNetWorth","portfolioCheck","health"].forEach(k => { if (s[k] !== undefined) D[k] = s[k]; });
+    ["overview","portfolio","watchlist","planning","cashflow","advisor"].forEach(sec => {
       const fn = AppleSections["render" + sec.charAt(0).toUpperCase() + sec.slice(1)];
       const el = document.getElementById("section-" + sec);
       if (fn && el) el.innerHTML = fn();
@@ -372,7 +380,7 @@
     if (window.checkWatchlistAlerts) checkWatchlistAlerts();
   }
 
-  window.Nexus = { navigateTo, flashTicker, getActive: () => active };
+  window.Nexus = { navigateTo, flashTicker, applySnapshotData, getActive: () => active };
 
   if (window.CommandPalette) CommandPalette.init();
   if (window.NexusTweaks) NexusTweaks.init();

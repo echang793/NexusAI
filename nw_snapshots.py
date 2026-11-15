@@ -28,7 +28,7 @@ def _load_raw() -> dict:
 def _save_raw(snapshots: dict) -> None:
     try:
         tmp = SNAPSHOT_FILE + ".tmp"
-        with open(tmp, "w") as f:
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
             json.dump({"snapshots": snapshots}, f, indent=2)
         os.replace(tmp, SNAPSHOT_FILE)
     except Exception:

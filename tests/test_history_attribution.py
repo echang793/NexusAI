@@ -184,3 +184,25 @@ def test_analytics_blob_is_stored_with_the_day(hist):
 def test_day_without_analytics_has_no_key(hist):
     hist.record_day("2026-10-26", 1000, {}, [], True)
     assert "analytics" not in hist.load_days()["2026-10-26"]
+
+
+def test_benchmark_price_and_time_are_stored_when_given(hist):
+    hist.record_day("2026-10-26", 1000, {}, [], True, benchmark=754.37)
+    d = hist.load_days()["2026-10-26"]
+    assert d["spy"] == 754.37 and "at" in d
+
+
+def test_missing_or_nan_benchmark_is_omitted(hist):
+    hist.record_day("2026-10-26", 1000, {}, [], True, benchmark=float("nan"))
+    hist.record_day("2026-10-27", 1000, {}, [], True)
+    assert "spy" not in hist.load_days()["2026-10-26"] and "spy" not in hist.load_days()["2026-10-27"]
+
+
+def test_all_account_balances_are_stored_for_goal_tracking(hist):
+    hist.record_day("2026-10-26", 1000, {}, [], True, balances={"Webull Brokerage": 112059.4, "TOTAL CHECKING": 2227.26})
+    assert hist.load_days()["2026-10-26"]["bal"] == {"Webull Brokerage": 112059, "TOTAL CHECKING": 2227}
+
+
+def test_non_finite_balances_are_dropped(hist):
+    hist.record_day("2026-10-26", 1000, {}, [], True, balances={"A": float("nan"), "B": 5.0})
+    assert hist.load_days()["2026-10-26"]["bal"] == {"B": 5}

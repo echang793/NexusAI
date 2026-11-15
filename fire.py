@@ -57,7 +57,8 @@ def compute(profile: dict, invested: float) -> dict:
 
 
 def monte_carlo(invested: float, annual_contribution: float, years: int, target: float,
-                 mean_return: float = 0.07, volatility: float = 0.15, trials: int = 1500) -> dict:
+                 mean_return: float = 0.07, volatility: float = 0.15, trials: int = 1500,
+                 seed: int | None = None) -> dict:
     """% of simulated random-return paths that reach `target` within `years`.
 
     Smooth compounding at a fixed rate hides sequence-of-returns risk —
@@ -68,11 +69,12 @@ def monte_carlo(invested: float, annual_contribution: float, years: int, target:
         return {"successPct": None, "trials": 0}
     if years <= 0:
         return {"successPct": 100.0 if invested >= target else 0.0, "trials": 0}
+    rng = random.Random(seed)   # seed=None -> fresh randomness, as before
     hits = 0
     for _ in range(trials):
         bal = invested
         for _year in range(years):
-            r = random.gauss(mean_return, volatility)
+            r = rng.gauss(mean_return, volatility)
             bal = bal * (1.0 + r) + annual_contribution
         if bal >= target:
             hits += 1

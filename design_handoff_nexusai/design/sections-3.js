@@ -23,6 +23,7 @@
         ${taxLossCard(D.taxLossHarvest)}
         ${dividendsCard(D.dividends)}
       </div>
+      ${window.AppleSections.planningMoney ? window.AppleSections.planningMoney() : ""}
     `;
   }
 
@@ -92,10 +93,15 @@
     }).join("");
     return `
       <div class="card">
-        <div class="card-head"><h3>Contribution room</h3><div class="meta">2025 IRS limits</div></div>
+        <div class="card-head"><h3>Contribution room</h3><div class="meta">${(cd["401k"] || {}).limitsYear || ""} IRS limits${(cd["401k"] || {}).limitsEstimated ? " (latest known)" : ""}</div></div>
         <div class="card-body">
           ${rows}
-          <div class="muted" style="font-size:11px;">YTD amounts are entered manually in Settings — no transaction feed to derive them from.</div>
+          <div class="muted" style="font-size:11px; line-height:1.5;">
+            ${["401k", "hsa", "roth"].some(k => (cd[k] || {}).source === "fidelity")
+              ? "Detected from your synced Fidelity activity; a number typed in Settings overrides it. Roth IRA at Webull isn't synced — enter it in Settings."
+              : "YTD amounts are entered in Settings; synced Fidelity accounts fill in automatically."}
+            ${(cd["401k"] || {}).mayIncludeEmployer ? " The 401(k) figure may include employer match, which doesn't count toward your limit." : ""}
+          </div>
         </div>
       </div>
     `;
@@ -137,6 +143,7 @@
               <div style="font-size:20px; font-weight:700; color:${efd.healthy ? "var(--green)" : "var(--red)"};">${efd.monthsCovered != null ? efd.monthsCovered : "—"}</div>
             </div>
           </div>
+          ${efd.monthsCoveredActual != null ? `<div class="muted" style="font-size:12px; margin-bottom:6px;">At your actual spending (${fmt$(efd.monthlyExpenseActual, { compact: true })}/mo from transactions): <b style="color:${efd.healthyActual ? "var(--green)" : "var(--red)"}">${efd.monthsCoveredActual} months</b></div>` : ""}
           <div class="muted" style="font-size:11px; margin-bottom:14px;">
             ${efd.monthlyExpense ? `Based on ${fmt$(efd.monthlyExpense, { compact: true })}/mo expense estimate — set exact figure in Settings.` : "Set a monthly expense estimate in Settings to enable this."}
             ${!efd.healthy && efd.monthsCovered != null ? " Under the common 3-month minimum." : ""}
@@ -197,6 +204,7 @@
   }
 
   function hydratePlanning() {
+    if (window.AppleSections.hydratePlanningMoney) window.AppleSections.hydratePlanningMoney();
     requestAnimationFrame(() => {
       document.querySelectorAll("[data-w]").forEach(el => { el.style.width = el.dataset.w + "%"; });
     });

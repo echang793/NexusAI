@@ -21,6 +21,15 @@ import insights as ins
 import nw_snapshots
 import daily_history
 import analytics
+import transactions
+import cashflow
+import investment_flows
+import performance
+import goals as goals_mod
+import attribution
+import health as health_mod
+import budget as budget_mod
+import scenarios
 import planning as plan
 import portfolio as pf
 import profile as pr
@@ -519,7 +528,7 @@ def _build_account_list(positions: list, extra_accounts: list) -> list:
             "id": f"extra_{i}",
             "name": a["name"],
             "type": ui_type,
-            "balance": a["balance"] if not ac.is_liability(a["type"]) else -abs(a["balance"]),
+            "balance": a["balance"] if not ac.is_liability(a["type"]) else 0.0 - abs(a["balance"]),  # 0.0 - x: never -0.0
             "institution": institution,
             "updated": a.get("updated", ""),
         })
@@ -651,7 +660,7 @@ def build_nexus_data(force: bool = False) -> dict:
     total_pl_pct = (total_pl / total_cost * 100) if total_cost else 0.0
 
     acct_list = _build_account_list(positions, extra_accounts)
-    net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
+    net_worth = _net_worth(acct_list)
     unpriced = _unpriced_tickers(holdings)
     # "Invested" = holdings positions + manual accounts that are actually
     # invested (e.g. RoboInvestor), not cash/checking — the balance actually
@@ -660,7 +669,8 @@ def build_nexus_data(force: bool = False) -> dict:
     coastfire_status = cf.compute(raw_profile, invested_total)
     nw_history = _net_worth_history(net_worth, total_value, acct_list, prices_complete=not unpriced,
                                     details=_snapshot_details(acct_list, coastfire_status))
-    _record_daily(net_worth, acct_list, positions, complete=not unpriced)
+    portfolio_check = _portfolio_check(positions)
+    _record_daily(net_worth, acct_list, positions, complete=not unpriced, stats=portfolio_check)
 
     sector_map: dict[str, float] = {}
     for p in positions:
@@ -671,12 +681,14 @@ def build_nexus_data(force: bool = False) -> dict:
         for k, v in sorted(sector_map.items(), key=lambda x: -x[1])
     ]
 
-    contributions_status = ct.compute(raw_profile)
+    contributions_status = ct.compute(raw_profile, detected=_detected_contributions())
     rebalance_status = rb.compute(raw_profile, positions)
     tax_loss_candidates = tlh.scan(positions, float(raw_profile.get("tlh_threshold_pct", -10) or -10))
     dividends_status = dv.compute(positions, _div_cache)
-    cash_total = sum(a["balance"] for a in extra_accounts if a.get("type") in {"Cash", "HYSA"})
-    emergency_fund_status = plan.emergency_fund(raw_profile, cash_total)
+    cash_total = _liquid_cash(extra_accounts)
+    cash_flow_status = _cash_flow_status(raw_profile)
+    planning_status = _planning_status(raw_profile, acct_list, cash_flow_status)
+    emergency_fund_status = plan.emergency_fund(raw_profile, cash_total, cash_flow_status["avgMonthlySpend"])
     nw_percentile = plan.net_worth_percentile(int(raw_profile.get("age", 30) or 30), net_worth)
 
     fire_status = fr.compute(raw_profile, invested_total)
@@ -746,6 +758,16 @@ def build_nexus_data(force: bool = False) -> dict:
         "taxLossHarvest": tax_loss_candidates,
         "dividends": dividends_status,
         "emergencyFund": emergency_fund_status,
+        "cashFlow": cash_flow_status,
+        "performance": _performance_status(),
+        "investmentFlows": _investment_flows_status(),
+        "goals": planning_status["goals"],
+        "budget": planning_status["budget"],
+        "categoryRules": cashflow.load_rules(),
+        "portfolioCheck": portfolio_check,
+        "health": _health_status(),
+        "whyItMoved": _why_it_moved(),
+        "dailyNetWorth": _daily_net_worth(),
         "netWorthPercentile": nw_percentile,
         "insights": insights_list,
         "watchlist": wl_out,
@@ -793,7 +815,7 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
 
             extra_accounts = ac.load_accounts()
             acct_list = _build_account_list(positions, extra_accounts)
-            net_worth = sum(a["balance"] for a in acct_list if a.get("type") != "Debt")
+            net_worth = _net_worth(acct_list)
             unpriced = _unpriced_tickers(holdings)
             invested_total = _investable_total(total_value, extra_accounts)
             coastfire_status = cf.compute(raw_profile, invested_total)
@@ -855,12 +877,14 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
 
             # 5. Planning features — cheap, pure functions over what's above
             _prefetch_dividends(tickers)  # blocking (already in a bg thread)
-            contributions_status = ct.compute(raw_profile)
+            contributions_status = ct.compute(raw_profile, detected=_detected_contributions())
             rebalance_status = rb.compute(raw_profile, positions)
             tax_loss_candidates = tlh.scan(positions, float(raw_profile.get("tlh_threshold_pct", -10) or -10))
             dividends_status = dv.compute(positions, _div_cache)
-            cash_total = sum(a["balance"] for a in extra_accounts if a.get("type") in {"Cash", "HYSA"})
-            emergency_fund_status = plan.emergency_fund(raw_profile, cash_total)
+            cash_total = _liquid_cash(extra_accounts)
+            cash_flow_status = _cash_flow_status(raw_profile)
+            planning_status = _planning_status(raw_profile, acct_list, cash_flow_status)
+            emergency_fund_status = plan.emergency_fund(raw_profile, cash_total, cash_flow_status["avgMonthlySpend"])
             nw_percentile = plan.net_worth_percentile(int(raw_profile.get("age", 30) or 30), net_worth)
 
             fire_status = fr.compute(raw_profile, invested_total)
@@ -902,6 +926,11 @@ def _start_bg_enrichment(holdings, featured_ticker, raw_profile, roth_tickers, h
                         "taxLossHarvest": tax_loss_candidates,
                         "dividends": dividends_status,
                         "emergencyFund": emergency_fund_status,
+                        "cashFlow": cash_flow_status,
+                        "performance": _performance_status(),
+                        "investmentFlows": _investment_flows_status(),
+                        "goals": planning_status["goals"],
+                        "budget": planning_status["budget"],
                         "netWorthPercentile": nw_percentile,
                         "insights": insights_list,
                         "featured": featured,
@@ -1084,14 +1113,158 @@ def _snapshot_details(acct_list: list, coastfire_status: dict) -> dict:
     return d
 
 
-def _record_daily(net_worth: float, acct_list: list, positions: list, complete: bool) -> None:
+# Accounts whose balance is spendable cash for the emergency-fund check. HSA is
+# excluded on purpose (health money, and tracked via its holdings).
+_LIQUID_TYPES = {"Cash", "HYSA", "Checking", "Savings", "Money Market", "CD"}
+
+
+def _liquid_cash(extra_accounts: list) -> float:
+    return sum(float(a["balance"]) for a in extra_accounts if a.get("type") in _LIQUID_TYPES)
+
+
+def _cash_flow_status(raw_profile: dict) -> dict:
+    """Income / spending / savings rate from stored Plaid transactions. Empty
+    (completeMonths 0) until a transactions-enabled Item has synced."""
+    try:
+        rows = list(transactions.load()["txns"].values())
+        return cashflow.summary(rows, datetime.date.today(), cashflow.load_rules(),
+                                float(raw_profile.get("coastfire_annual_spend", 0) or 0) or None)
+    except Exception as e:
+        log.warning("cash flow unavailable: %s", e)
+        return cashflow.summary([], datetime.date.today())
+
+
+def _detected_contributions() -> dict:
+    """YTD contributions found in synced Fidelity transactions, by account kind."""
+    try:
+        return investment_flows.limit_ytd(investment_flows.load(), datetime.date.today().year)
+    except Exception as e:
+        log.warning("investment flows unavailable: %s", e)
+        return {}
+
+
+def _investment_flows_status() -> dict:
+    try:
+        flows = investment_flows.load()
+        today = datetime.date.today()
+        return {"synced": bool(flows.get("synced_at")), "syncedAt": flows.get("synced_at"),
+                "ytd": investment_flows.ytd(flows, today.year),
+                "dividendsTrailing12m": investment_flows.trailing_dividends(flows, today)}
+    except Exception as e:
+        log.warning("investment flows unavailable: %s", e)
+        return {"synced": False, "syncedAt": None, "ytd": {}, "dividendsTrailing12m": 0.0}
+
+
+def _performance_status() -> dict:
+    """Time-weighted return (holdings only) from the daily records, vs SPY."""
+    try:
+        days = daily_history.load_days()
+        usable = sorted(d for d, v in days.items() if v.get("complete"))
+        if len(usable) < 2:
+            return {"total": None, "byAccount": {}, "vsSpy": None, "since": usable[0] if usable else None}
+        start, end = usable[0], usable[-1]
+        return {"total": performance.twr(days, start, end),
+                "byAccount": performance.per_account(days, start, end),
+                "vsSpy": performance.vs_benchmark(days, start, end), "since": start}
+    except Exception as e:
+        log.warning("performance unavailable: %s", e)
+        return {"total": None, "byAccount": {}, "vsSpy": None, "since": None}
+
+
+def _planning_status(raw_profile: dict, acct_list: list, cash_flow: dict) -> dict:
+    """Goal progress and budget-vs-actual, from the profile + cash flow."""
+    today = datetime.date.today()
+    balances = {a["name"]: a["balance"] for a in acct_list}
+    rows = goals_mod.progress(raw_profile.get("savings_goals", []), balances, today)
+    goals_out = {"items": rows, "summary": goals_mod.summary(rows, cash_flow.get("avgMonthlySurplus"))}
+
+    budget = raw_profile.get("budget", {})
+    days_in_month = (today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - today.replace(day=1)
+    current, last = cash_flow.get("currentMonth"), cash_flow.get("lastMonth")
+    budget_out = {
+        "configured": bool(budget),
+        "current": (budget_mod.compare(budget, current["byCategory"], today.day / days_in_month.days)
+                    if budget and current else None),
+        "last": budget_mod.compare(budget, last["byCategory"]) if budget and last else None,
+        "currentMonth": current["month"] if current else None,
+        "lastMonth": last["month"] if last else None,
+    }
+    return {"goals": goals_out, "budget": budget_out}
+
+
+def _net_worth(acct_list: list) -> float:
+    """Assets minus debts. Debt cards carry NEGATIVE balances (see
+    _build_account_list), so a plain sum subtracts what is owed."""
+    return sum(float(a["balance"]) for a in acct_list)
+
+
+HEALTH_FILE = health_mod.HEALTH_FILE
+WHY_WINDOW_DAYS = 30
+
+
+def _portfolio_check(positions: list) -> dict:
+    return analytics.compute(positions, _div_cache, _classify_asset_class, risk=_risk_metrics())
+
+
+def _health_status() -> dict:
+    """What the watchdog would flag right now, for the dashboard banner."""
+    try:
+        record = health_mod.read(HEALTH_FILE)
+        problems = health_mod.evaluate(record, ac.load_accounts(), datetime.datetime.now())
+        return {"ok": not problems, "problems": problems,
+                "lastRun": (record or {}).get("finished")}
+    except Exception as e:
+        log.warning("health status unavailable: %s", e)
+        return {"ok": True, "problems": [], "lastRun": None}
+
+
+def _daily_net_worth() -> list:
+    days = daily_history.load_days()
+    return [{"date": d, "value": v["netWorth"]} for d, v in sorted(days.items())
+            if v.get("complete") and v.get("netWorth") is not None][-400:]
+
+
+def _why_it_moved() -> dict:
+    """Split the last ~30 days of net worth change into market / new shares / other accounts."""
+    try:
+        days = daily_history.load_days()
+        usable = sorted(d for d, v in days.items() if v.get("complete"))
+        if len(usable) < 2:
+            return {"available": False}
+        end = usable[-1]
+        start = (datetime.date.fromisoformat(end) - datetime.timedelta(days=WHY_WINDOW_DAYS)).isoformat()
+        r = attribution.attribute_range(days, start, end)
+        if r is None:
+            return {"available": False}
+        by_ticker: dict[str, float] = {}
+        for m in r["movers"]:
+            by_ticker[m["ticker"]] = by_ticker.get(m["ticker"], 0.0) + m["market"]
+        movers = [{"ticker": t, "market": round(v, 2)}
+                  for t, v in sorted(by_ticker.items(), key=lambda kv: -abs(kv[1]))[:5] if abs(v) >= 1]
+        other = sorted(r["other_by_account"].items(), key=lambda kv: -abs(kv[1]))[:5]
+        start_value = sum(h["q"] * h["p"] for h in days[r["start"]].get("holdings", {}).values())
+        return {"available": True, "start": r["start"], "end": r["end"],
+                "market": round(r["market"], 2), "contributions": round(r["contributions"], 2),
+                "other": round(r["other"], 2), "total": round(r["total"], 2),
+                "marketPct": round(r["market"] / start_value * 100, 2) if start_value > 0 else None,
+                "otherByAccount": [{"name": n, "change": round(v, 2)} for n, v in other],
+                "movers": movers}
+    except Exception as e:
+        log.warning("why-it-moved unavailable: %s", e)
+        return {"available": False}
+
+
+def _record_daily(net_worth: float, acct_list: list, positions: list, complete: bool,
+                  stats: dict | None = None) -> None:
     """Store today's per-account balances + per-holding quantity/price so a
     change in net worth can be explained later (attribution.py). Ticker-backed
     cards (`_computed`) are skipped here — their value is in `positions`."""
     try:
         accounts = {a["name"]: a["balance"] for a in acct_list if not a.get("_computed")}
-        stats = analytics.compute(positions, _div_cache, _classify_asset_class, risk=_risk_metrics())
-        daily_history.record_today(net_worth, accounts, positions, complete, analytics=stats)
+        stats = stats if stats is not None else _portfolio_check(positions)
+        daily_history.record_today(net_worth, accounts, positions, complete, analytics=stats,
+                                   benchmark=_pcache.get("SPY"),
+                                   balances={a["name"]: a["balance"] for a in acct_list})
     except Exception as e:
         log.warning("daily history not recorded: %s", e)
 
@@ -1109,7 +1282,8 @@ def _net_worth_history(net_worth: float, total_value: float, acct_list: list,
     """
     liabilities = sum(abs(a["balance"]) for a in acct_list if a.get("type") == "Debt")
     investments = total_value
-    other_assets = net_worth - investments
+    # Debts are their own line (liabilities); other_assets is assets only.
+    other_assets = net_worth + liabilities - investments
     if prices_complete:
         try:
             nw_snapshots.record_snapshot(net_worth, investments, other_assets, liabilities,
@@ -1678,6 +1852,57 @@ def api_save_profile():
     return jsonify({"ok": True})
 
 
+def _save_profile_field(field: str, value):
+    """Replace one profile field (goals/budget) through the validating save."""
+    existing = pr.load_profile()
+    existing[field] = value
+    saved = pr.save_profile(existing)
+    global _data_cache_ts
+    _data_cache_ts = 0.0
+    return saved
+
+
+@app.route("/api/goals", methods=["GET", "POST"])
+def api_save_goals():
+    if request.method == "GET":
+        return jsonify({"ok": True, "goals": pr.load_profile()["savings_goals"]})
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("goals"), list):
+        return jsonify({"ok": False, "error": "body must be {\"goals\": [...]}"}), 400
+    saved = _save_profile_field("savings_goals", body["goals"])
+    return jsonify({"ok": True, "goals": saved["savings_goals"]})
+
+
+@app.route("/api/budget", methods=["POST"])
+def api_save_budget():
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("budget"), dict):
+        return jsonify({"ok": False, "error": "body must be {\"budget\": {...}}"}), 400
+    saved = _save_profile_field("budget", body["budget"])
+    return jsonify({"ok": True, "budget": saved["budget"]})
+
+
+@app.route("/api/category-rules", methods=["POST"])
+def api_save_category_rules():
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("rules"), list):
+        return jsonify({"ok": False, "error": "body must be {\"rules\": [...]}"}), 400
+    saved = cashflow.save_rules(body["rules"])
+    global _data_cache_ts
+    _data_cache_ts = 0.0
+    return jsonify({"ok": True, "rules": saved})
+
+
+@app.route("/api/whatif", methods=["POST"])
+def api_whatif():
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "body must be an object of overrides"}), 400
+    data = build_nexus_data()
+    result = scenarios.what_if(pr.load_profile(), float(data["coastFire"].get("invested", 0) or 0), body)
+    return jsonify({"ok": True, **result})
+
+
 @app.route("/api/export/gains")
 def api_export_gains():
     """Unrealized-gains CSV for tax season.
@@ -1730,6 +1955,16 @@ def api_snapshot():
         "emergencyFund": data["emergencyFund"],
         "netWorthPercentile": data["netWorthPercentile"],
         "insights": data["insights"],
+        "cashFlow": data["cashFlow"],
+        "categoryRules": data["categoryRules"],
+        "goals": data["goals"],
+        "budget": data["budget"],
+        "performance": data["performance"],
+        "investmentFlows": data["investmentFlows"],
+        "whyItMoved": data["whyItMoved"],
+        "dailyNetWorth": data["dailyNetWorth"],
+        "portfolioCheck": data["portfolioCheck"],
+        "health": data["health"],
     })
 
 

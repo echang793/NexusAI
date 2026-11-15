@@ -1,7 +1,11 @@
 """Investor profile persistence: risk tolerance, horizon, goals, planning inputs."""
 
+import copy
+import datetime
 import json
+import math
 import os
+import re
 
 PROFILE_FILE = os.getenv("PROFILE_FILE", "profile.json")
 
@@ -33,7 +37,15 @@ DEFAULTS = {
     # Emergency-fund coverage — monthly expense; 0 falls back to
     # coastfire_annual_spend / 12 at compute time.
     "monthly_expense": 0,
+    # Savings goals [{id, name, target, date, linked: [account names], extra}] and
+    # a monthly budget {PLAID_CATEGORY: amount}; both edited from the Planning tab.
+    "savings_goals": [],
+    "budget": {},
 }
+
+MAX_GOALS = 20
+MAX_BUDGET_CATEGORIES = 40
+_CATEGORY_KEY = re.compile(r"^[A-Z][A-Z_]{0,39}$")
 
 VALID_RISK = {"conservative", "moderate", "aggressive"}
 VALID_GOALS = {"retirement", "wealth_building", "income", "preservation"}
@@ -57,13 +69,13 @@ def load_profile(path=None):
     """Load profile from JSON. Returns dict with defaults if missing/invalid."""
     path = path or PROFILE_FILE
     if not os.path.exists(path):
-        return dict(DEFAULTS)
+        return copy.deepcopy(DEFAULTS)
     try:
         with open(path, "r") as f:
             data = json.load(f)
         return _coerce(data)
     except Exception:
-        return dict(DEFAULTS)
+        return copy.deepcopy(DEFAULTS)
 
 
 def save_profile(profile, path=None):
@@ -85,6 +97,50 @@ def _clamped_float(p, field, lo, hi):
     if hi is not None:
         v = min(hi, v)
     return v
+
+
+def _finite_float(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _clean_goals(raw):
+    goals, used = [], set()
+    for g in (raw if isinstance(raw, list) else []):
+        if not isinstance(g, dict) or len(goals) >= MAX_GOALS:
+            continue
+        name = str(g.get("name") or "").strip()[:60]
+        target = _finite_float(g.get("target"))
+        if not name or target is None or target <= 0:
+            continue
+        date = str(g.get("date") or "")
+        try:
+            datetime.date.fromisoformat(date)
+        except ValueError:
+            date = ""
+        extra = _finite_float(g.get("extra"))
+        linked = [str(n).strip()[:80] for n in (g.get("linked") or []) if str(n).strip()][:10]
+        base = re.sub(r"[^a-z0-9]+", "-", str(g.get("id") or name).lower()).strip("-")[:40] or "goal"
+        gid, n = base, 2
+        while gid in used:
+            gid, n = f"{base}-{n}", n + 1
+        used.add(gid)
+        goals.append({"id": gid, "name": name, "target": min(target, 1e9), "date": date,
+                      "linked": linked, "extra": max(0.0, extra or 0.0)})
+    return goals
+
+
+def _clean_budget(raw):
+    out = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        amount = _finite_float(v)
+        if isinstance(k, str) and _CATEGORY_KEY.match(k) and amount is not None and amount >= 0 \
+                and len(out) < MAX_BUDGET_CATEGORIES:
+            out[k] = amount
+    return out
 
 
 def _coerce(p):
@@ -141,6 +197,8 @@ def _coerce(p):
     }
     for field, lo, hi in _FLOAT_FIELDS:
         out[field] = _clamped_float(p, field, lo, hi)
+    out["savings_goals"] = _clean_goals(p.get("savings_goals"))
+    out["budget"] = _clean_budget(p.get("budget"))
     return out
 
 

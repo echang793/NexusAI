@@ -16,6 +16,9 @@ import server  # noqa: E402
 import nw_snapshots  # noqa: E402
 import accounts as ac  # noqa: E402
 import daily_history  # noqa: E402
+import transactions  # noqa: E402
+import cashflow  # noqa: E402
+import investment_flows  # noqa: E402
 
 
 @pytest.fixture
@@ -251,6 +254,9 @@ def _isolate_user_data(tmp_path_factory):
     mp.setattr(server, "RISK_CACHE_FILE", str(d / "risk_cache.json"))
     mp.setattr(nw_snapshots, "SNAPSHOT_FILE", str(d / "nw_history.json"))
     mp.setattr(daily_history, "HISTORY_FILE", str(d / "daily_history.json"))
+    mp.setattr(transactions, "TX_FILE", str(d / "transactions.json"))
+    mp.setattr(cashflow, "RULES_FILE", str(d / "category_rules.json"))
+    mp.setattr(investment_flows, "FLOWS_FILE", str(d / "investment_flows.json"))
     yield
     mp.undo()
 
@@ -314,3 +320,274 @@ def test_build_stores_analytics_with_the_daily_record(monkeypatch):
     server.build_nexus_data(force=True)
     a = daily_history.load_days()[datetime.date.today().isoformat()].get("analytics")
     assert a is not None and "top5Pct" in a and "allocation" in a
+
+
+# --- Debts are subtracted from net worth ---------------------------------------
+def test_net_worth_subtracts_debts():
+    acct_list = [{"type": "Cash", "balance": 5000.0}, {"type": "Taxable", "balance": 10000.0},
+                 {"type": "Debt", "balance": -1500.0}]
+    assert server._net_worth(acct_list) == 13500.0
+
+
+def test_snapshot_records_debt_as_liability_not_inside_other_assets(tmp_path, monkeypatch):
+    monkeypatch.setattr(nw_snapshots, "SNAPSHOT_FILE", str(tmp_path / "nw.json"))
+    acct_list = [{"type": "Cash", "balance": 5000.0}, {"type": "Debt", "balance": -1500.0}]
+    server._net_worth_history(3500.0, 0.0, acct_list)
+    snap = nw_snapshots.load_history()[0]
+    assert snap["value"] == 3500 and snap["liabilities"] == 1500
+    assert snap["otherAssets"] == 5000          # assets only; the debt is its own line
+
+
+def test_build_with_a_credit_card_lowers_net_worth_by_the_balance(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    base_rows = ac.load_accounts()
+    card = {"name": "Test Card", "type": "Credit Card", "balance": 1500.0,
+            "notes": "", "updated": "2026-11-14"}
+    monkeypatch.setattr(server.ac, "load_accounts", lambda *a, **k: list(base_rows))
+    without = server.build_nexus_data(force=True)["netWorth"]
+    monkeypatch.setattr(server.ac, "load_accounts", lambda *a, **k: list(base_rows) + [card])
+    with_card = server.build_nexus_data(force=True)["netWorth"]
+    assert without - with_card == pytest.approx(1500.0, abs=0.01)
+
+
+# --- Cash flow in the dashboard payload ------------------------------------------
+def _seed_transactions(months_back=4, spend=3000.0, income=5000.0):
+    import datetime
+    first = datetime.date.today().replace(day=1)
+    added = []
+    for n in range(1, months_back + 1):
+        y, m = first.year, first.month - n
+        while m < 1:
+            y, m = y - 1, m + 12
+        d = f"{y:04d}-{m:02d}-05"
+        added.append({"transaction_id": f"s{n}", "account_id": "a", "date": d, "amount": spend,
+                      "name": "RENT", "merchant_name": "", "pending": False,
+                      "personal_finance_category": {"primary": "RENT_AND_UTILITIES", "detailed": ""}})
+        added.append({"transaction_id": f"i{n}", "account_id": "a", "date": d, "amount": -income,
+                      "name": "PAYROLL", "merchant_name": "", "pending": False,
+                      "personal_finance_category": {"primary": "INCOME", "detailed": ""}})
+    transactions.apply_sync("k", added, [], [], "c")
+
+
+def test_payload_has_empty_cash_flow_without_transactions(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    d = server.build_nexus_data(force=True)
+    assert d["cashFlow"]["completeMonths"] == 0 and d["cashFlow"]["avgMonthlySpend"] is None
+
+
+def test_payload_cash_flow_and_actual_emergency_fund_from_transactions(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    _seed_transactions()
+    d = server.build_nexus_data(force=True)
+    cf_ = d["cashFlow"]
+    assert cf_["avgMonthlySpend"] == pytest.approx(3000.0) and cf_["avgSavingsRate"] == pytest.approx(40.0)
+    ef = d["emergencyFund"]
+    assert ef["monthlyExpenseActual"] == pytest.approx(3000.0)
+    assert ef["monthsCoveredActual"] is not None
+    assert "monthlyExpense" in ef                         # the assumed-spend figure stays beside it
+    import json
+    json.dumps(d["cashFlow"], allow_nan=False)
+
+
+def test_liquid_cash_counts_checking_savings_cd_and_money_market_but_not_hsa_or_retirement():
+    rows = [{"type": t, "balance": 100.0} for t in
+            ("Cash", "HYSA", "Checking", "Savings", "Money Market", "CD", "HSA", "Retirement", "Taxable")]
+    assert server._liquid_cash(rows) == 600.0
+
+
+def test_build_stores_spy_price_with_the_daily_record(monkeypatch):
+    import datetime
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    monkeypatch.setitem(server._pcache, "SPY", 777.77)
+    server.build_nexus_data(force=True)
+    assert daily_history.load_days()[datetime.date.today().isoformat()]["spy"] == 777.77
+
+
+# --- Detected contributions + performance in the payload ----------------------------
+def test_payload_contributions_use_detected_fidelity_figures(monkeypatch):
+    import datetime
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    year = datetime.date.today().year
+    flows = investment_flows.aggregate(
+        [{"account_id": "h", "date": f"{year}-02-01", "type": "cash", "subtype": "deposit", "amount": -1000.0}],
+        {"h": "hsa"})
+    flows["synced_at"] = f"{year}-02-02"
+    investment_flows.save(flows)
+    d = server.build_nexus_data(force=True)
+    hsa = d["contributions"]["hsa"]
+    # a number typed in Settings would win; only assert the detected path when none is set
+    if not server.pr.load_profile().get("contrib_hsa_ytd"):
+        assert hsa["ytd"] == 1000.0 and hsa["source"] == "fidelity"
+    assert d["investmentFlows"]["synced"] is True
+
+
+def test_payload_performance_block_is_present_and_json_safe(monkeypatch):
+    import json
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    d = server.build_nexus_data(force=True)
+    perf = d["performance"]
+    assert set(perf) >= {"total", "byAccount", "vsSpy", "since"}
+    json.dumps(perf, allow_nan=False)
+
+
+def test_payload_performance_reflects_stored_daily_history(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    for day, price in (("2026-01-01", 100.0), ("2026-01-02", 110.0)):
+        daily_history.record_day(day, 0, {}, [{"ticker": "T", "account": "Brokerage", "shares": 1, "price": price}], True)
+    perf = server._performance_status()
+    assert perf["total"]["returnPct"] == pytest.approx(10.0)
+    assert "Brokerage" in perf["byAccount"]
+
+
+# --- Goals / budget / what-if / category rules (routes + payload) -------------------
+@pytest.fixture
+def tmp_profile(tmp_path, monkeypatch):
+    import profile as pr_mod
+    path = str(tmp_path / "profile.json")
+    monkeypatch.setattr(pr_mod, "PROFILE_FILE", path)
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    pr_mod.save_profile({"age": 26, "coastfire_retire_age": 55, "coastfire_annual_spend": 80000.0,
+                         "coastfire_return_pct": 7.0, "coastfire_monthly_contribution": 1000.0})
+    return pr_mod
+
+
+def test_payload_has_empty_goals_and_budget_by_default(tmp_profile):
+    d = server.build_nexus_data(force=True)
+    assert d["goals"]["items"] == [] and d["budget"]["configured"] is False
+
+
+def test_save_goals_route_validates_and_payload_shows_progress(client, tmp_profile):
+    import datetime
+    when = (datetime.date.today() + datetime.timedelta(days=365)).isoformat()
+    r = client.post("/api/goals", json={"goals": [
+        {"name": "House", "target": 12000, "date": when, "linked": [], "extra": 6000},
+        {"name": "", "target": 5}]})
+    assert r.status_code == 200 and [g["name"] for g in r.get_json()["goals"]] == ["House"]
+    d = server.build_nexus_data(force=True)
+    item = d["goals"]["items"][0]
+    assert item["pct"] == 50.0 and item["requiredMonthly"] == pytest.approx(500.0, rel=0.02)
+
+
+def test_save_goals_route_rejects_non_list(client, tmp_profile):
+    assert client.post("/api/goals", json={"goals": "nope"}).status_code == 400
+
+
+def test_save_budget_route_and_payload_compares_against_actual_spend(client, tmp_profile):
+    _seed_transactions(months_back=3, spend=3000.0)
+    r = client.post("/api/budget", json={"budget": {"RENT_AND_UTILITIES": 2500, "bad key": 1}})
+    assert r.status_code == 200 and r.get_json()["budget"] == {"RENT_AND_UTILITIES": 2500.0}
+    d = server.build_nexus_data(force=True)
+    b = d["budget"]
+    assert b["configured"] is True
+    row = b["last"]["rows"][0]
+    assert row["category"] == "RENT_AND_UTILITIES" and row["actual"] == 3000.0 and row["over"] is True
+
+
+def test_whatif_route_returns_baseline_scenario_and_delta(client, tmp_profile):
+    r = client.post("/api/whatif", json={"annual_spend": 60000})
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j["ok"] is True and j["scenario"]["fireNumber"] == 1_500_000 and j["baseline"]["fireNumber"] == 2_000_000
+
+
+def test_whatif_route_rejects_non_object_body(client, tmp_profile):
+    assert client.post("/api/whatif", json=[1, 2]).status_code == 400
+
+
+def test_category_rules_route_saves_validated_rules(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(cashflow, "RULES_FILE", str(tmp_path / "rules.json"))
+    r = client.post("/api/category-rules", json={"rules": [
+        {"match": "landlord", "category": "RENT_AND_UTILITIES"},
+        {"match": "", "category": "X"}, {"match": "venmo", "category": "bad key"}, "junk"]})
+    assert r.status_code == 200 and r.get_json()["rules"] == [{"match": "landlord", "category": "RENT_AND_UTILITIES"}]
+    assert cashflow.load_rules() == [{"match": "landlord", "category": "RENT_AND_UTILITIES"}]
+    assert client.post("/api/category-rules", json={"rules": "x"}).status_code == 400
+
+
+# --- Dashboard blocks: health, why it moved, daily net worth, portfolio check ---------
+def _seed_days():
+    import datetime
+    today = datetime.date.today()
+    for back, price in ((10, 100.0), (5, 105.0)):
+        d = (today - datetime.timedelta(days=back)).isoformat()
+        daily_history.record_day(
+            d, 1000 + price, {"TOTAL CHECKING": 3000 - back * 10},
+            [{"ticker": "T", "account": "Brokerage", "shares": 10, "price": price}], True)
+
+
+def test_payload_daily_net_worth_is_sorted_complete_days(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    _seed_days()
+    d = server.build_nexus_data(force=True)
+    series = d["dailyNetWorth"]
+    assert [p["date"] for p in series] == sorted(p["date"] for p in series) and len(series) >= 3
+    assert all(isinstance(p["value"], (int, float)) for p in series)
+
+
+def test_payload_why_it_moved_splits_the_recent_change(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    _seed_days()
+    w = server.build_nexus_data(force=True)["whyItMoved"]
+    assert w["available"] is True and w["market"] == pytest.approx(50.0)     # 10 shares x +$5
+    assert {"contributions", "other", "otherByAccount", "movers", "start", "end"} <= set(w)
+    assert w["movers"][0]["ticker"] == "T"
+
+
+def test_payload_why_it_moved_unavailable_without_history(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    monkeypatch.setattr(daily_history, "HISTORY_FILE", str(tmp_path / "empty.json"))
+    # the build itself writes today's record, so only one day exists -> nothing to compare
+    assert server.build_nexus_data(force=True)["whyItMoved"]["available"] is False
+
+
+def test_payload_portfolio_check_matches_what_is_stored(monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    d = server.build_nexus_data(force=True)
+    assert {"top5Pct", "allocation", "topStocks"} <= set(d["portfolioCheck"])
+
+
+def test_payload_health_lists_watchdog_problems(monkeypatch, tmp_path):
+    import health as health_mod
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    monkeypatch.setattr(health_mod, "HEALTH_FILE", str(tmp_path / "health.json"))
+    monkeypatch.setattr(server, "HEALTH_FILE", str(tmp_path / "health.json"))
+    monkeypatch.setattr(server.ac, "load_accounts", lambda *a, **k: [])    # no stale-Plaid noise
+    d = server.build_nexus_data(force=True)
+    assert d["health"]["ok"] is False and d["health"]["problems"][0]["code"] == "never_ran"
+    health_mod.write(str(tmp_path / "health.json"), {
+        "started": "x", "finished": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "ok": True, "steps": {}, "unpriced": []})
+    d = server.build_nexus_data(force=True)
+    assert d["health"]["ok"] is True and d["health"]["problems"] == []
+
+
+def test_snapshot_includes_the_new_dashboard_blocks(client, monkeypatch):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    d = client.get("/api/snapshot").get_json()
+    for key in ("cashFlow", "goals", "budget", "performance", "investmentFlows", "whyItMoved",
+                "dailyNetWorth", "portfolioCheck", "health"):
+        assert key in d, key
+
+
+def test_payload_exposes_category_rules(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "_unpriced_tickers", lambda holdings: [])
+    monkeypatch.setattr(cashflow, "RULES_FILE", str(tmp_path / "r.json"))
+    cashflow.save_rules([{"match": "landlord", "category": "RENT_AND_UTILITIES"}])
+    d = server.build_nexus_data(force=True)
+    assert d["categoryRules"] == [{"match": "landlord", "category": "RENT_AND_UTILITIES"}]
+    assert server.app.test_client().get("/api/snapshot").get_json()["categoryRules"] == d["categoryRules"]
+
+
+def test_get_goals_returns_the_stored_raw_goals_including_links(client, tmp_profile):
+    client.post("/api/goals", json={"goals": [{"name": "House", "target": 5000, "date": "2030-01-01",
+                                               "linked": ["TOTAL CHECKING"], "extra": 250}]})
+    g = client.get("/api/goals").get_json()["goals"]
+    assert g[0]["linked"] == ["TOTAL CHECKING"] and g[0]["extra"] == 250.0 and g[0]["id"]
+
+
+def test_zero_balance_debt_is_plain_zero_not_negative_zero():
+    import math
+    rows = server._build_account_list([], [{"name": "CARD", "type": "Credit Card", "balance": 0.0,
+                                            "notes": "", "updated": "2026-11-14"}])
+    bal = rows[0]["balance"]
+    assert bal == 0 and math.copysign(1.0, bal) == 1.0       # +0.0, so it renders as $0 and JSON says 0.0

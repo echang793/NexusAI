@@ -116,6 +116,8 @@
           <div class="e ${D.totalPL >= 0 ? 'pl-pos' : 'pl-neg'}">${fmtPct(D.totalPLPct)} · all-time</div>
         </div>
       </div>
+      ${window.AppleSections.portfolioMoney ? window.AppleSections.portfolioMoney() : ""}
+      <div class="mb-m"></div>
 
       <div class="card">
         <div class="card-head">

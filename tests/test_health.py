@@ -172,6 +172,9 @@ def _stub_refresh(monkeypatch, tmp_path, plaid_boom=False, unpriced=()):
         return {"ok": True}
     monkeypatch.setattr(dr.plaid_sync, "pull_balances", pull)
     monkeypatch.setattr(dr.plaid_sync, "pull_investment_holdings", lambda: {"ok": True})
+    monkeypatch.setattr(dr.plaid_sync, "pull_transactions", lambda: {"ok": True})
+    monkeypatch.setattr(dr.plaid_sync, "pull_investment_activity", lambda: {"ok": True})
+    monkeypatch.setattr(dr.datastore_backup, "backup_daily", lambda *a, **k: {"dir": "x", "copied": []})
     built = []
     monkeypatch.setattr(dr.server, "build_nexus_data", lambda force=False: (
         built.append(1) or {"netWorth": 1000.0, "netWorthHistory": [], "pricesIncomplete": list(unpriced)}))
@@ -197,3 +200,50 @@ def test_daily_refresh_records_unpriced_tickers(monkeypatch, tmp_path):
     dr, _ = _stub_refresh(monkeypatch, tmp_path, unpriced=["ZZZZ"])
     dr.main()
     assert health.read(str(tmp_path / "health.json"))["unpriced"] == ["ZZZZ"]
+
+
+def test_plaid_ok_false_result_fails_the_step_so_the_watchdog_can_see_it(monkeypatch, tmp_path):
+    dr, built = _stub_refresh(monkeypatch, tmp_path)
+    monkeypatch.setattr(dr.plaid_sync, "pull_balances", lambda: {"ok": False, "reason": "Plaid error: boom"})
+    assert dr.main() == 1
+    rec = health.read(str(tmp_path / "health.json"))
+    assert rec["steps"]["plaid_balances"]["ok"] is False
+    assert "boom" in rec["steps"]["plaid_balances"]["error"]
+    assert built                                              # the build still ran
+
+
+def test_partial_plaid_errors_also_fail_the_step(monkeypatch, tmp_path):
+    dr, _ = _stub_refresh(monkeypatch, tmp_path)
+    monkeypatch.setattr(dr.plaid_sync, "pull_balances",
+                        lambda: {"ok": True, "count": 1, "partial_errors": ["ApiException: ITEM_LOGIN_REQUIRED"]})
+    assert dr.main() == 1
+    assert "ITEM_LOGIN_REQUIRED" in health.read(str(tmp_path / "health.json"))["steps"]["plaid_balances"]["error"]
+
+
+def test_transactions_step_is_recorded_and_failures_are_flagged(monkeypatch, tmp_path):
+    dr, _ = _stub_refresh(monkeypatch, tmp_path)
+    monkeypatch.setattr(dr.plaid_sync, "pull_transactions",
+                        lambda: {"ok": False, "errors": ["ITEM_LOGIN_REQUIRED"], "reason": "1 item failed"})
+    assert dr.main() == 1
+    assert health.read(str(tmp_path / "health.json"))["steps"]["transactions"]["ok"] is False
+
+
+def test_investment_activity_step_failure_is_flagged(monkeypatch, tmp_path):
+    dr, _ = _stub_refresh(monkeypatch, tmp_path)
+    monkeypatch.setattr(dr.plaid_sync, "pull_investment_activity",
+                        lambda: {"ok": False, "reason": "1 item(s) failed: item x: ITEM_LOGIN_REQUIRED"})
+    assert dr.main() == 1
+    assert health.read(str(tmp_path / "health.json"))["steps"]["investment_activity"]["ok"] is False
+
+
+def test_backup_runs_first_and_a_failure_is_flagged(monkeypatch, tmp_path):
+    dr, built = _stub_refresh(monkeypatch, tmp_path)
+    order = []
+    monkeypatch.setattr(dr.datastore_backup, "backup_daily",
+                        lambda *a, **k: order.append("backup") or (_ for _ in ()).throw(RuntimeError("disk full")))
+    monkeypatch.setattr(dr.import_holdings, "main", lambda: order.append("import"))
+    assert dr.main() == 1
+    assert order == ["backup", "import"]                       # snapshot of yesterday's state before anything changes
+    rec = health.read(str(tmp_path / "health.json"))
+    assert rec["steps"]["backup"]["ok"] is False and "disk full" in rec["steps"]["backup"]["error"]
+    assert built                                                # the rest of the refresh still ran
