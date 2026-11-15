@@ -2002,4 +2002,6 @@ if __name__ == "__main__":
             pass
     threading.Thread(target=_warm, daemon=True).start()
 
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    # Loopback only: /data.js and the POST routes are unauthenticated and the
+    # data is real financial info. Override with NEXUS_HOST only on purpose.
+    app.run(host=os.getenv("NEXUS_HOST", "127.0.0.1"), port=port, debug=False, threaded=True)

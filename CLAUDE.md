@@ -31,7 +31,8 @@ install the launchd plists (see Gotchas).
 - **`server.py`** — current Flask app, the live UI. Run it with
   `./scripts/run_server.sh [port]`: it kills whatever is already on the port,
   starts a detached server, logs to `server.log`, PID in `.server.pid`.
-  Default port 5001 (macOS AirPlay squats on 5000). Don't start it with a bare
+  Binds 127.0.0.1 only (routes are unauthenticated and the data is real; set `NEXUS_HOST` to
+  override on purpose). Default port 5001 (macOS AirPlay squats on 5000). Don't start it with a bare
   `python3 server.py &` — that leaves stale servers serving old code.
   Serves `/`, `/data.js`, `/api/*`.
 - **`app.py`** — older Streamlit dashboard, launched by `run.sh`
