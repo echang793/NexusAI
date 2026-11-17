@@ -6,6 +6,7 @@ import math
 import os
 import sys
 import time
+import urllib.parse
 import threading
 
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -13,6 +14,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 sys.path.insert(0, os.path.dirname(__file__))
 
 import accounts as ac
+import screenshot_import as si
 import coastfire as cf
 import contributions as ct
 import dividends as dv
@@ -1669,6 +1671,11 @@ def api_save_accounts():
     body = request.get_json(force=True) or {}
     accts = body.get("accounts") or []
     # Skip computed brokerage account; save only user-managed ones
+    # The dashboard only knows coarse UI types and never sees the Plaid tags, so
+    # rebuilding rows from its payload alone would drop the tags (the next sync
+    # then appends duplicates) and flatten Retirement/Checking/HSA types. Carry
+    # both over from the stored row of the same name; an edited type still wins.
+    previous = {r["name"]: r for r in ac.load_accounts()}
     ac_list = []
     for a in accts:
         if a.get("id") in ("brokerage",) or a.get("_computed"):
@@ -1679,14 +1686,23 @@ def api_save_accounts():
         # Liabilities → use the liability type
         if ui_type == "Debt":
             ac_type = "Credit Card"
-        ac_list.append({
-            "name": a.get("name", "Account"),
+        name = a.get("name", "Account")
+        prev = previous.get(name)
+        if prev and _AC_TO_UI.get(prev["type"], "Other Asset") == ui_type:
+            ac_type = prev["type"]  # unchanged in the UI's terms: keep the specific type
+        row = {
+            "name": name,
             "type": ac_type,
             "balance": balance,
             "notes": a.get("institution", ""),
             # Stamp today only when the balance changed; else keep prior date
             "updated": a.get("updated") or datetime.date.today().isoformat(),
-        })
+        }
+        if prev:
+            for tag in ("source", "plaid_account_id"):
+                if prev.get(tag):
+                    row[tag] = prev[tag]
+        ac_list.append(row)
     ac.save_accounts(ac_list)
     # Invalidate data cache
     global _data_cache_ts
@@ -1752,6 +1768,118 @@ def api_import_portfolio():
     clean = pf.save_portfolio(holdings)
     _refresh_after_holdings_change(clean)
     return jsonify({"ok": True, "count": len(clean), "dropped": dropped})
+
+
+# ---------------------------------------------------------------------------
+# Screenshot import: read a screenshot with the local vision model, preview, confirm
+# ---------------------------------------------------------------------------
+DATA_ROOT = os.path.dirname(os.path.abspath(__file__))
+_screenshot_lock = threading.Lock()  # the model is slow; one read at a time
+_MAX_JSON_BYTES = 2 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = si.MAX_IMAGE_BYTES + 1024 * 1024
+
+
+def _screenshot_paths():
+    return si.Paths(root=DATA_ROOT,
+                    accounts=os.path.join(DATA_ROOT, ac.ACCOUNTS_FILE),
+                    portfolio=os.path.join(DATA_ROOT, config.PORTFOLIO_FILE))
+
+
+def _foreign_origin():
+    """These routes read and write real financial data and the server has no
+    login, so a web page open in another tab must not be able to drive them.
+    Browsers always send Origin on cross-site POSTs; curl and scripts send none."""
+    origin = request.headers.get("Origin")
+    if origin and urllib.parse.urlparse(origin).netloc != request.host:
+        return jsonify({"ok": False, "error": "Cross-site requests are not allowed"}), 403
+    return None
+
+
+def _screenshot_json():
+    """-> (body, None) or (None, error response). JSON content type is required:
+    text/plain is a 'simple' cross-site request that skips the CORS preflight."""
+    if not request.is_json:
+        return None, (jsonify({"ok": False, "error": "Content-Type must be application/json"}), 415)
+    raw = request.get_data(cache=True)
+    if len(raw) > _MAX_JSON_BYTES:
+        return None, (jsonify({"ok": False, "error": "Request too large"}), 413)
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return None, (jsonify({"ok": False, "error": "Body is not valid JSON"}), 400)
+    if not isinstance(body, dict):
+        return None, (jsonify({"ok": False, "error": "Body must be a JSON object"}), 400)
+    return body, None
+
+
+@app.errorhandler(413)
+def _too_large(_e):
+    return jsonify({"ok": False, "error": "Request too large"}), 413
+
+
+@app.route("/api/screenshot/parse", methods=["POST"])
+def api_screenshot_parse():
+    """One screenshot -> the accounts/positions the vision model read. Writes nothing."""
+    if (bad := _foreign_origin()):
+        return bad
+    upload = request.files.get("file")
+    if not upload:
+        return jsonify({"ok": False, "error": "No screenshot uploaded"}), 400
+    blob = upload.read(si.MAX_IMAGE_BYTES + 1)
+    if not _screenshot_lock.acquire(blocking=False):
+        return jsonify({"ok": False, "error": "Still reading another screenshot; try again in a moment"}), 429
+    try:
+        found = si.extract_accounts(blob)
+    except si.ImageError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except si.NothingFound as e:
+        return jsonify({"ok": False, "error": str(e)}), 422
+    except si.ExtractError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    finally:
+        _screenshot_lock.release()
+    paths = _screenshot_paths()
+    targets = si.list_targets(paths)
+    for a in found:
+        a["suggested"] = si.suggest_target(a, targets["manual"])
+    return jsonify({"ok": True, "accounts": found, "targets": targets})
+
+
+def _public_plan(plan):
+    return {"ok": plan["ok"], "errors": plan["errors"], "warnings": plan["warnings"],
+            "changes": [{k: v for k, v in c.items() if k != "final"} for c in plan["changes"]]}
+
+
+@app.route("/api/screenshot/preview", methods=["POST"])
+def api_screenshot_preview():
+    """Describe what applying the chosen items would change. Writes nothing."""
+    if (bad := _foreign_origin()):
+        return bad
+    body, err = _screenshot_json()
+    if err:
+        return err
+    return jsonify(_public_plan(si.build_plan(body.get("items"), _screenshot_paths())))
+
+
+@app.route("/api/screenshot/apply", methods=["POST"])
+def api_screenshot_apply():
+    """Re-validate the items, back up, then write. Never trusts a client-side preview."""
+    if (bad := _foreign_origin()):
+        return bad
+    body, err = _screenshot_json()
+    if err:
+        return err
+    paths = _screenshot_paths()
+    try:
+        result = si.apply_plan(body.get("items"), paths, accept_warnings=body.get("accept_warnings") is True)
+    except si.PlanError as e:
+        return jsonify({"ok": False, "errors": e.errors}), 422
+    except si.PlanBlocked as e:
+        return jsonify({"ok": False, "needs_confirmation": True, "warnings": e.warnings}), 409
+    global _data_cache_ts
+    _data_cache_ts = 0.0
+    _refresh_after_holdings_change(pf.load_portfolio(paths.portfolio))
+    return jsonify(result)
 
 
 @app.route("/api/snapshot-now", methods=["POST"])

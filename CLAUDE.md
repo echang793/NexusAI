@@ -79,7 +79,7 @@ install the launchd plists (see Gotchas).
 ## Commands
 - Run server: `./scripts/run_server.sh` → http://localhost:5001
 - Run legacy Streamlit UI: `./run.sh` → http://localhost:8502
-- Test: `.venv/bin/python3 -m pytest tests/ -q` — 362 passed. `pytest` is not in
+- Test: `.venv/bin/python3 -m pytest tests/ -q` — 470 passed. `pytest` is not in
   `requirements.txt`; install it. The suite is hermetic: a session fixture
   redirects the price/period/risk caches and `nw_history.json` to a temp dir,
   and Plaid is forced to "unconfigured". yfinance stderr noise for fake tickers
@@ -142,6 +142,13 @@ install the launchd plists (see Gotchas).
   what-if, performance, portfolio check, why-it-moved, health banner. New payload blocks must also be
   added to `/api/snapshot` AND the key list in `applySnapshotData` (index.html) or they won't refresh
   after a save. Everything from Plaid/the user is escaped (`esc()`) before `innerHTML`.
+- `screenshot_import.py` + `design_handoff_nexusai/design/screenshot.js` — "From screenshot" buttons (Overview
+  Accounts card, Holdings card). A local Ollama vision model (`OLLAMA_VISION_MODEL`, default `qwen2.5vl:7b`)
+  reads a screenshot; routes `/api/screenshot/parse|preview|apply`. Preview and confirm every time; apply re-plans
+  server-side and backs up first. Targets: Webull taxable / Roth holdings CSVs (merge, or replace only when the
+  positions add up to the shown total) and manual-account balances. Plaid-synced accounts and HSA are refused
+  (they update themselves). Checks: qty x price vs value, positions vs total, large swings. These routes reject
+  foreign `Origin`s and non-JSON bodies. The model can misread digits: a human should glance at the preview.
 - `scripts/import_holdings.py` / `scripts/apply_snapshot.py` — brokerage
   CSV import pipeline (drop exports in `imports/`).
 - `config.py` — central env-driven config/thresholds; loads `.env` via
@@ -173,6 +180,10 @@ install the launchd plists (see Gotchas).
 - **Net worth subtracts debts.** Debt rows carry negative balances; `server._net_worth()` sums everything.
   (It used to skip debts entirely.) Emergency-fund cash is `server._liquid_cash()`: Cash, HYSA, Checking,
   Savings, Money Market, CD (it used to count only Cash/HYSA, so checking showed as $0).
+- **`POST /api/accounts` must keep Plaid tags.** The dashboard only sees coarse UI types and no `source` /
+  `plaid_account_id`; the route now carries both over from the stored row of the same name (an edited type
+  still wins). Before the fix a dashboard save stripped them, so the next Plaid sync would have appended
+  duplicate rows and hidden the 401(k) from CoastFIRE (regression tests in `tests/test_accounts_save.py`).
 - **Profile fields are whitelisted.** `profile._coerce()` rebuilds the dict from known fields; a new
   profile field that isn't added there is silently dropped on save.
 - **Transactions need consent first.** Until the user runs the `--update 1 --products transactions` link,

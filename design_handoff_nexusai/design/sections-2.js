@@ -127,6 +127,7 @@
             <div class="range-pills" id="pl-horizon-pills">
               ${HORIZONS.map(h => `<button data-hz="${h}" class="${h === _plHorizon ? 'active' : ''}">${h}</button>`).join("")}
             </div>
+            <button class="btn-ghost" data-shot-open title="Update holdings from a screenshot">${Icon("plus", 12)} From screenshot</button>
             <button class="btn-ghost" id="hold-import-btn">${Icon("plus", 12)} Import CSV</button>
             <button class="btn-primary" id="hold-edit-btn">${Icon("edit", 12)} Edit holdings</button>
             <input type="file" id="hold-csv-file" accept=".csv" hidden/>

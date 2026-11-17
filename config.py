@@ -26,6 +26,7 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2000"))
 # Ollama local (free)
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").strip()
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b").strip()  # recommended: llama3.1:8b
+OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "qwen2.5vl:7b").strip()  # reads screenshots
 
 # Which LLM backend to use: "ollama" or "anthropic"
 # Ollama takes priority if configured, then Anthropic, then rule-based fallback.

@@ -106,7 +106,11 @@ def _diff(old, rows):
 def _backup(root, paths):
     stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     dest = os.path.join(root, "backups", stamp)
-    os.makedirs(dest, exist_ok=True)
+    n = 1
+    while os.path.exists(dest):  # two writes in one second must not share a backup
+        n += 1
+        dest = os.path.join(root, "backups", f"{stamp}-{n}")
+    os.makedirs(dest)
     for p in paths:
         if os.path.exists(p):
             shutil.copy2(p, dest)

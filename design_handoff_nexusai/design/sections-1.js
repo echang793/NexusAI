@@ -101,6 +101,7 @@
         <div class="card">
           <div class="card-head"><h3>Accounts</h3>
             <div class="flex gap-s">
+              <button class="btn-ghost" data-shot-open title="Update accounts and Webull holdings from a screenshot">${Icon("plus", 12)} From screenshot</button>
               <button class="btn-ghost" id="ow-snapshot-now" title="Record net worth to history now">${Icon("check", 12)} Snapshot now</button>
               <button class="btn-primary" id="ow-add-account">${Icon("plus", 12)} Add account</button>
             </div>
